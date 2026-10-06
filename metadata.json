@@ -1,0 +1,6 @@
+{
+  "name": "UNIMAID StudentMarket",
+  "description": "Official UNIMAID Student Marketplace foundation for campus buying, selling, and student services.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
