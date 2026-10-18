@@ -23,6 +23,7 @@ import com.example.ui.screens.messages.MessagesScreen
 import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.seller.SellerHubScreen
 import com.example.ui.viewmodels.MarketplaceViewModel
+import com.example.ui.viewmodels.NotificationViewModel
 
 @Composable
 fun MainScreen(
@@ -43,15 +44,19 @@ fun MainScreen(
     onNavigateToCreateListing: (() -> Unit)? = null,
     onNavigateToEditListing: ((String) -> Unit)? = null,
     onNavigateToMyListings: (() -> Unit)? = null,
-    onNavigateToOrders: (() -> Unit)? = null
+    onNavigateToOrders: (() -> Unit)? = null,
+    onNavigateToSellerReviews: ((String) -> Unit)? = null,
+    notificationViewModel: NotificationViewModel = viewModel()
 ) {
     var currentTab by rememberSaveable { mutableStateOf(MainNavTab.HOME) }
     val marketplaceViewModel: MarketplaceViewModel = viewModel()
     val sessionState by authRepository.sessionState.collectAsState()
+    val notificationUiState by notificationViewModel.uiState.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(sessionState) {
         val uid = (sessionState as? com.example.core.session.SessionState.Authenticated)?.session?.userId
         marketplaceViewModel.onUserSessionChanged(uid)
+        notificationViewModel.onUserSessionChanged(uid)
     }
 
     Scaffold(
@@ -59,6 +64,7 @@ fun MainScreen(
         bottomBar = {
             UnimaidBottomNav(
                 selectedTab = currentTab,
+                unreadNotificationsCount = notificationUiState.unreadCount,
                 onTabSelected = { tab ->
                     if (tab == MainNavTab.SELL_POST) {
                         if (sessionState is com.example.core.session.SessionState.Authenticated) {
@@ -89,6 +95,7 @@ fun MainScreen(
                         onNavigateToVerification = onNavigateToVerification,
                         onNavigateToSellerHub = onNavigateToSellerHub,
                         onNavigateToNotifications = onNavigateToNotifications,
+                        unreadNotificationsCount = notificationUiState.unreadCount,
                         onToggleTheme = onToggleTheme,
                         onNavigateToProfileCompletion = onNavigateToProfileCompletion,
                         marketplaceViewModel = marketplaceViewModel,
@@ -115,7 +122,8 @@ fun MainScreen(
                         onNavigateToEditListing = { id -> onNavigateToEditListing?.invoke(id) },
                         onNavigateToProductDetails = onNavigateToProductDetails,
                         onNavigateToLogin = onNavigateToLogin,
-                        onNavigateToSellerOrders = onNavigateToOrders
+                        onNavigateToSellerOrders = onNavigateToOrders,
+                        onNavigateToSellerReviews = onNavigateToSellerReviews
                     )
                 }
                 MainNavTab.MESSAGES -> {
@@ -135,8 +143,10 @@ fun MainScreen(
                         onSetThemeMode = onSetThemeMode,
                         onNavigateToProfileCompletion = onNavigateToProfileCompletion,
                         onNavigateToNotifications = onNavigateToNotifications,
+                        unreadNotificationsCount = notificationUiState.unreadCount,
                         onNavigateToMyListings = { onNavigateToMyListings?.invoke() ?: onNavigateToSellerHub() },
-                        onNavigateToOrders = onNavigateToOrders
+                        onNavigateToOrders = onNavigateToOrders,
+                        onNavigateToSellerReviews = onNavigateToSellerReviews
                     )
                 }
             }

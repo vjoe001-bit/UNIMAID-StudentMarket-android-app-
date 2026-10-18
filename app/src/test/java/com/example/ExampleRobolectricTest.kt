@@ -67,9 +67,9 @@ class ExampleRobolectricTest {
     fun `verify verification request model states`() {
         val pendingReq = com.example.data.models.VerificationRequest(
             id = "vr-1",
-            studentId = "usr-1",
+            userId = "usr-1",
             matricNumber = "19/04/02/001",
-            studentIdCardUrl = "verification-documents/usr-1/id.jpg",
+            documentUrl = "verification-documents/usr-1/id.jpg",
             status = "PENDING"
         )
         assertEquals("PENDING", pendingReq.status)
@@ -137,12 +137,12 @@ class ExampleRobolectricTest {
             totalAmount = 7000.0,
             status = "MEETING_ARRANGED",
             paymentStatus = "PHYSICAL_PENDING",
-            meetupLocation = "UNIMAID Senate Building"
+            meetingLocation = "UNIMAID Senate Building"
         )
         assertEquals("MEETING_ARRANGED", order.status)
         assertEquals("PHYSICAL_PENDING", order.paymentStatus)
         assertEquals("PHYSICAL_MEETUP", order.deliveryMethod)
-        assertEquals("UNIMAID Senate Building", order.meetupLocation)
+        assertEquals("UNIMAID Senate Building", order.meetingLocation)
     }
 
     @Test

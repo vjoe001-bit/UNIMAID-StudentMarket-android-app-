@@ -18,17 +18,41 @@ data class Favorite(
 @JsonClass(generateAdapter = true)
 data class Review(
     val id: String,
+    @Json(name = "order_id")
+    val orderId: String,
     @Json(name = "reviewer_id")
     val reviewerId: String,
-    @Json(name = "target_user_id")
-    val targetUserId: String,
+    @Json(name = "reviewed_user_id")
+    val reviewedUserId: String,
     @Json(name = "listing_id")
     val listingId: String? = null,
     val rating: Int, // 1 to 5
     val comment: String? = null,
     @Json(name = "created_at")
     val createdAt: String? = null,
-    val reviewer: Profile? = null
+    @Json(name = "updated_at")
+    val updatedAt: String? = null,
+    val reviewer: Profile? = null,
+    val reviewed: Profile? = null,
+    val listing: Listing? = null,
+    val order: Order? = null
+) {
+    val targetUserId: String
+        get() = reviewedUserId
+}
+
+@JsonClass(generateAdapter = true)
+data class CreateReviewDto(
+    @Json(name = "order_id")
+    val orderId: String,
+    @Json(name = "reviewer_id")
+    val reviewerId: String,
+    @Json(name = "reviewed_user_id")
+    val reviewedUserId: String,
+    @Json(name = "listing_id")
+    val listingId: String? = null,
+    val rating: Int,
+    val comment: String? = null
 )
 
 @JsonClass(generateAdapter = true)

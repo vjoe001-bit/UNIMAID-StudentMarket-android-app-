@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -60,7 +62,9 @@ enum class MainNavTab(
 fun UnimaidBottomNav(
     selectedTab: MainNavTab,
     onTabSelected: (MainNavTab) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    unreadMessagesCount: Int = 0,
+    unreadNotificationsCount: Int = 0
 ) {
     Surface(
         modifier = modifier
@@ -81,6 +85,11 @@ fun UnimaidBottomNav(
             MainNavTab.values().forEach { tab ->
                 val isSelected = tab == selectedTab
                 val isCenterAction = tab == MainNavTab.SELL_POST
+                val tabBadgeCount = when (tab) {
+                    MainNavTab.MESSAGES -> unreadMessagesCount
+                    MainNavTab.PROFILE -> unreadNotificationsCount
+                    else -> 0
+                }
 
                 if (isCenterAction) {
                     // Center prominent circular button
@@ -119,12 +128,25 @@ fun UnimaidBottomNav(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                contentDescription = tab.label,
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            BadgedBox(
+                                badge = {
+                                    if (tabBadgeCount > 0) {
+                                        Badge(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        ) {
+                                            Text(if (tabBadgeCount > 99) "99+" else tabBadgeCount.toString())
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
+                                    contentDescription = tab.label,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = tab.label,

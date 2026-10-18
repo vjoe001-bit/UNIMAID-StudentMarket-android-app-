@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Badge
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -129,15 +132,20 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
     onNavigateToProfileCompletion: () -> Unit = {},
     onNavigateToNotifications: () -> Unit = {},
+    unreadNotificationsCount: Int = 0,
     onNavigateToMyListings: () -> Unit = onNavigateToSellerHub,
     onNavigateToOrders: (() -> Unit)? = null,
+    onNavigateToSellerReviews: ((String) -> Unit)? = null,
     profileRepository: ProfileRepository = ProfileRepositoryImpl(),
-    verificationRepository: VerificationRepository = VerificationRepositoryImpl()
+    verificationRepository: VerificationRepository = VerificationRepositoryImpl(),
+    reviewRepository: com.example.data.repository.ReviewRepository = remember { com.example.data.repository.ReviewRepositoryImpl() }
 ) {
     val sessionState by authRepository.sessionState.collectAsState()
     val currentTheme = LocalThemeMode.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+
+    var mySellerRatingSummary by remember { mutableStateOf<com.example.data.repository.SellerRatingSummary?>(null) }
 
     val isAuthenticated = sessionState is SessionState.Authenticated
     val session = (sessionState as? SessionState.Authenticated)?.session
@@ -199,6 +207,12 @@ fun ProfileScreen(
         scope.launch {
             when (val ordRes = profileRepository.getUserOrders(uid)) {
                 is SupabaseResult.Success -> myOrdersCount = ordRes.data.size
+                else -> {}
+            }
+        }
+        scope.launch {
+            when (val revRes = reviewRepository.calculateSellerRating(uid)) {
+                is SupabaseResult.Success -> mySellerRatingSummary = revRes.data
                 else -> {}
             }
         }
@@ -641,11 +655,26 @@ fun ProfileScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = AppSpacing.md))
 
                     ProfileMenuRow(
+                        title = "Seller Reviews & Reputation",
+                        subtitle = if (mySellerRatingSummary != null && mySellerRatingSummary!!.totalReviews > 0)
+                            "%.1f ★ from ${mySellerRatingSummary!!.totalReviews} buyer handovers".format(mySellerRatingSummary!!.averageRating)
+                        else "View student feedback from completed handovers",
+                        icon = Icons.Default.Star,
+                        onClick = {
+                            session?.userId?.let { onNavigateToSellerReviews?.invoke(it) }
+                        },
+                        testTag = "menu_seller_reviews"
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = AppSpacing.md))
+
+                    ProfileMenuRow(
                         title = "Campus Notifications",
                         subtitle = "Orders, verification alerts and messages",
                         icon = Icons.Outlined.Notifications,
                         onClick = onNavigateToNotifications,
-                        testTag = "menu_notifications"
+                        testTag = "menu_notifications",
+                        badgeCount = unreadNotificationsCount
                     )
 
                     if (session?.isAdmin == true) {
@@ -952,7 +981,8 @@ private fun ProfileMenuRow(
     subtitle: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    testTag: String
+    testTag: String,
+    badgeCount: Int = 0
 ) {
     Row(
         modifier = Modifier
@@ -980,6 +1010,15 @@ private fun ProfileMenuRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (badgeCount > 0) {
+            Badge(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+                modifier = Modifier.padding(end = AppSpacing.sm)
+            ) {
+                Text(text = badgeCount.toString())
+            }
         }
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowForward,

@@ -91,6 +91,7 @@ fun HomeScreen(
     onNavigateToNotifications: () -> Unit,
     onToggleTheme: () -> Unit,
     modifier: Modifier = Modifier,
+    unreadNotificationsCount: Int = 0,
     onNavigateToProfileCompletion: () -> Unit = {},
     marketplaceViewModel: MarketplaceViewModel = viewModel(),
     onNavigateToCart: (() -> Unit)? = null,
@@ -245,12 +246,20 @@ fun HomeScreen(
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .testTag("home_notifications_button")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = "Notifications",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        BadgedBox(
+                            badge = {
+                                if (unreadNotificationsCount > 0) {
+                                    Badge { Text(unreadNotificationsCount.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Notifications",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -511,7 +520,7 @@ fun HomeScreen(
             if (featured != null) {
                 Box(modifier = Modifier.padding(horizontal = AppSpacing.screenPadding)) {
                     UnimaidHorizontalListingCard(
-                        title = featured.title,
+                        title = featured.displayTitle,
                         categoryName = "${ItemCondition.format(featured.condition)} • ${featured.locationCampus ?: "UNIMAID Campus"}",
                         price = "₦${"%,.0f".format(featured.price)}",
                         imageUrl = featured.images.firstOrNull()?.imageUrl,
@@ -609,7 +618,7 @@ fun HomeScreen(
                             val isFavFirst = uiState.favoriteListingIds.contains(first.id)
                             Box(modifier = Modifier.weight(1f)) {
                                 UnimaidProductCard(
-                                    title = first.title,
+                                    title = first.displayTitle,
                                     price = "₦${"%,.0f".format(first.price)}",
                                     imageUrl = first.images.firstOrNull()?.imageUrl,
                                     condition = ItemCondition.format(first.condition),
@@ -642,7 +651,7 @@ fun HomeScreen(
                                 val isFavSecond = uiState.favoriteListingIds.contains(second.id)
                                 Box(modifier = Modifier.weight(1f)) {
                                     UnimaidProductCard(
-                                        title = second.title,
+                                        title = second.displayTitle,
                                         price = "₦${"%,.0f".format(second.price)}",
                                         imageUrl = second.images.firstOrNull()?.imageUrl,
                                         condition = ItemCondition.format(second.condition),

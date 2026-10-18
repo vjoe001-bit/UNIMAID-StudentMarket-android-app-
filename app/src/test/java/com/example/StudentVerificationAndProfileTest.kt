@@ -41,9 +41,9 @@ class StudentVerificationAndProfileTest {
         // 2. Pending State
         val pendingRequest = VerificationRequest(
             id = "req-1",
-            studentId = "usr-1",
+            userId = "usr-1",
             matricNumber = "19/04/02/001",
-            studentIdCardUrl = "verification-documents/usr-1/id.jpg",
+            documentUrl = "verification-documents/usr-1/id.jpg",
             status = "PENDING"
         )
         val pendingState = StudentVerificationState.resolve(baseProfile, pendingRequest)

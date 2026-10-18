@@ -136,7 +136,7 @@ class MarketplaceRepositoryImpl(
                 filters["campus_location"] = "ilike.*${locationCampus.trim()}*"
             }
             if (isAvailable == true) {
-                filters["status"] = "eq.ACTIVE"
+                filters["status"] = "in.(ACTIVE,active)"
             }
 
             val response = restApi.getListings(order = order, limit = limit, filters = filters)

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -101,12 +102,16 @@ fun SellerHubScreen(
     onNavigateToLogin: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToMyListings: (() -> Unit)? = null,
-    onNavigateToSellerOrders: (() -> Unit)? = null
+    onNavigateToSellerOrders: (() -> Unit)? = null,
+    onNavigateToSellerReviews: ((String) -> Unit)? = null,
+    reviewRepository: com.example.data.repository.ReviewRepository = remember { com.example.data.repository.ReviewRepositoryImpl() }
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val sessionState by authRepository.sessionState.collectAsState()
     val currentUserId = (sessionState as? SessionState.Authenticated)?.session?.userId
+
+    var mySellerRating by remember { mutableStateOf<com.example.data.repository.SellerRatingSummary?>(null) }
 
     val uiState by marketplaceViewModel.uiState.collectAsState()
     var filterTab by remember { mutableStateOf("ALL") } // ALL, ACTIVE, SOLD, DEACTIVATED
@@ -117,6 +122,10 @@ fun SellerHubScreen(
     LaunchedEffect(currentUserId) {
         if (!currentUserId.isNullOrBlank()) {
             marketplaceViewModel.loadSellerListings(currentUserId)
+            when (val res = reviewRepository.calculateSellerRating(currentUserId)) {
+                is SupabaseResult.Success -> mySellerRating = res.data
+                else -> {}
+            }
         }
     }
 
@@ -422,6 +431,78 @@ fun SellerHubScreen(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Seller Reviews & Reputation Card
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                currentUserId?.let { onNavigateToSellerReviews?.invoke(it) }
+                            }
+                            .testTag("hub_seller_reviews_card"),
+                        shape = AppRadius.md,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(AppSpacing.md),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = com.example.core.theme.UnimaidGold,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(AppSpacing.sm))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Seller Reviews & Rating",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val rating = mySellerRating
+                                        if (rating != null && rating.totalReviews > 0) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = AppRadius.full,
+                                                color = com.example.core.theme.UnimaidGoldContainer
+                                            ) {
+                                                Text(
+                                                    text = "★ %.1f (${rating.totalReviews})".format(rating.averageRating),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = com.example.core.theme.UnimaidGoldOnContainer,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "Genuine student buyer feedback from completed campus handovers",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                         }

@@ -36,3 +36,16 @@ data class VerificationRequest(
     val studentIdCardUrl: String
         get() = documentUrl ?: ""
 }
+
+@JsonClass(generateAdapter = true)
+data class CreateVerificationRequestDto(
+    val id: String,
+    @Json(name = "user_id")
+    val userId: String,
+    @Json(name = "matric_number")
+    val matricNumber: String,
+    @Json(name = "document_url")
+    val documentUrl: String? = null,
+    val status: String = "PENDING"
+)
+

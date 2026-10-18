@@ -5,7 +5,10 @@ import com.example.core.network.SupabaseErrorHandler
 import com.example.core.network.SupabaseResult
 import com.example.core.network.rest.SupabaseRestApi
 import com.example.data.models.Conversation
+import com.example.data.models.CreateConversationDto
+import com.example.data.models.CreateMessageDto
 import com.example.data.models.Message
+import com.example.data.models.NotificationTypes
 import java.util.UUID
 
 interface ChatRepository {
@@ -17,7 +20,8 @@ interface ChatRepository {
 }
 
 class ChatRepositoryImpl(
-    private val restApi: SupabaseRestApi = SupabaseClient.createRestApi()
+    private val restApi: SupabaseRestApi = SupabaseClient.createRestApi(),
+    private val notificationRepository: NotificationRepository = NotificationRepositoryImpl()
 ) : ChatRepository {
 
     override suspend fun getConversations(userId: String): SupabaseResult<List<Conversation>> {
@@ -55,8 +59,8 @@ class ChatRepositoryImpl(
             if (existing.isSuccessful && !existing.body().isNullOrEmpty()) {
                 SupabaseResult.Success(existing.body()!!.first())
             } else {
-                // Create a new conversation
-                val newConv = Conversation(
+                // Create a new conversation with clean DTO
+                val newConv = CreateConversationDto(
                     id = UUID.randomUUID().toString(),
                     buyerId = currentUserId,
                     sellerId = otherUserId,
@@ -94,7 +98,7 @@ class ChatRepositoryImpl(
         content: String
     ): SupabaseResult<Message> {
         return try {
-            val msg = Message(
+            val msg = CreateMessageDto(
                 id = UUID.randomUUID().toString(),
                 conversationId = conversationId,
                 senderId = senderId,
@@ -113,6 +117,23 @@ class ChatRepositoryImpl(
                         )
                     )
                 }
+
+                // Create notification for receiver
+                runCatching {
+                    val preview = if (content.length > 60) content.take(57) + "..." else content
+                    notificationRepository.createNotification(
+                        userId = receiverId,
+                        title = "New Message",
+                        message = preview,
+                        type = NotificationTypes.MESSAGE,
+                        dataPayload = mapOf(
+                            "conversation_id" to conversationId,
+                            "sender_id" to senderId,
+                            "entity_id" to conversationId
+                        )
+                    )
+                }
+
                 SupabaseResult.Success(sent)
             } else {
                 SupabaseErrorHandler.parseHttpError(response.code(), response.errorBody())

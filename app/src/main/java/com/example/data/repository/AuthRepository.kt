@@ -15,6 +15,7 @@ import com.example.core.session.SessionManager
 import com.example.core.session.SessionState
 import com.example.core.session.UserSession
 import com.example.core.validation.StudentEmailValidator
+import com.example.data.models.CreateProfileDto
 import com.example.data.models.Profile
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException
@@ -112,16 +113,13 @@ class AuthRepositoryImpl(
                         val existingResp = restApi.getProfileById("eq.$userId")
                         val alreadyExists = existingResp.isSuccessful && existingResp.body()?.isNotEmpty() == true
                         if (!alreadyExists) {
-                            val newProfile = Profile(
+                            val newProfile = CreateProfileDto(
                                 id = userId,
                                 fullName = fullName.trim().ifBlank { "UNIMAID Student" },
                                 matricNumber = matricNumber?.trim().takeIf { !it.isNullOrBlank() },
                                 department = department?.trim().takeIf { !it.isNullOrBlank() },
                                 level = level?.trim().takeIf { !it.isNullOrBlank() } ?: "100L",
-                                isVerified = false,
-                                isSuspended = false,
-                                email = trimmedEmail,
-                                phoneNumber = phoneNumber?.trim().takeIf { !it.isNullOrBlank() }
+                                isVerified = false
                             )
                             restApi.insertProfile(newProfile)
                         }
@@ -195,12 +193,11 @@ class AuthRepositoryImpl(
                     ?: trimmedEmail.substringBefore("@").ifBlank { "UNIMAID Student" }
 
                 // Resolve profile and admin status directly from Supabase tables
-                val isDesignatedAdmin = AdminConfig.isDesignatedAdmin(userId, trimmedEmail)
-                var isVerified = isDesignatedAdmin
-                var isAdmin = isDesignatedAdmin
+                var isVerified = false
+                var isAdmin = false
                 var resolvedFullName = fallbackName
                 var isProfileComplete = false
-                var verificationStatus = if (isDesignatedAdmin) "VERIFIED" else "UNVERIFIED"
+                var verificationStatus = "UNVERIFIED"
 
                 if (userId.isNotBlank()) {
                     try {
@@ -215,17 +212,13 @@ class AuthRepositoryImpl(
                             verificationStatus = if (profile.isVerified) "VERIFIED" else "UNVERIFIED"
                         } else {
                             // First time login with no profile: create and recover one
-                            val newProfile = Profile(
+                            val newProfile = CreateProfileDto(
                                 id = userId,
                                 fullName = fallbackName,
                                 department = (user?.userMetadata?.get("department") as? String),
-                                faculty = (user?.userMetadata?.get("faculty") as? String),
                                 level = (user?.userMetadata?.get("level") as? String) ?: "100L",
                                 matricNumber = (user?.userMetadata?.get("matric_number") as? String),
-                                isVerified = false,
-                                isSuspended = false,
-                                email = user?.email ?: trimmedEmail,
-                                phoneNumber = (user?.userMetadata?.get("phone_number") as? String)
+                                isVerified = false
                             )
                             val insertResp = restApi.insertProfile(newProfile)
                             if (insertResp.isSuccessful && insertResp.body()?.isNotEmpty() == true) {
@@ -235,7 +228,7 @@ class AuthRepositoryImpl(
                                 resolvedFullName = created.fullName ?: newProfile.fullName ?: fallbackName
                                 verificationStatus = if (created.isVerified) "VERIFIED" else "UNVERIFIED"
                             } else {
-                                isProfileComplete = newProfile.isComplete
+                                isProfileComplete = !newProfile.department.isNullOrBlank() && !newProfile.matricNumber.isNullOrBlank()
                                 resolvedFullName = newProfile.fullName ?: fallbackName
                             }
                         }
@@ -243,9 +236,9 @@ class AuthRepositoryImpl(
                         // Non-fatal; continue with session metadata
                     }
 
-                    // Query latest verification request status
+                    // Query latest verification request status using exact database column user_id
                     try {
-                        val verifResp = restApi.getVerificationRequests(filters = mapOf("student_id" to "eq.$userId"))
+                        val verifResp = restApi.getVerificationRequests(filters = mapOf("user_id" to "eq.$userId"))
                         if (verifResp.isSuccessful) {
                             val latestReq = verifResp.body()?.firstOrNull()
                             if (latestReq != null) {
@@ -271,7 +264,10 @@ class AuthRepositoryImpl(
                     try {
                         val roleResp = restApi.getAdminRoleForUser("eq.$userId")
                         if (roleResp.isSuccessful && roleResp.body()?.isNotEmpty() == true) {
-                            isAdmin = true
+                            val role = roleResp.body()!!.first()
+                            if (role.role.equals("ADMIN", ignoreCase = true) || role.role.equals("SUPER_ADMIN", ignoreCase = true)) {
+                                isAdmin = true
+                            }
                         }
                     } catch (e: Throwable) {
                         // Non-fatal
@@ -383,12 +379,11 @@ class AuthRepositoryImpl(
                 val user = userResp.body()!!
                 val isEmailConfirmed = !user.emailConfirmedAt.isNullOrBlank() || !user.confirmedAt.isNullOrBlank()
 
-                // Refresh profile details in background
-                val isDesignatedAdmin = AdminConfig.isDesignatedAdmin(user.id, user.email ?: currentSession.email)
-                var isVerified = currentSession.isVerified || isDesignatedAdmin
-                var isAdmin = currentSession.isAdmin || isDesignatedAdmin
+                // Refresh profile and security roles strictly from database
+                var isVerified = false
+                var isAdmin = false
                 var isProfileComplete = currentSession.isProfileComplete
-                var verificationStatus = if (isDesignatedAdmin) "VERIFIED" else currentSession.verificationStatus
+                var verificationStatus = "UNVERIFIED"
                 var resolvedFullName = currentSession.fullName
 
                 try {
@@ -402,36 +397,32 @@ class AuthRepositoryImpl(
                         }
                         verificationStatus = if (p.isVerified) "VERIFIED" else "UNVERIFIED"
                     } else if (pResp.isSuccessful && pResp.body().isNullOrEmpty()) {
-                        // Profile missing: safely recover it
+                        // Profile missing: safely recover it with clean DTO
                         val userMetaName = (user.userMetadata?.get("full_name") as? String)
                             ?: (user.userMetadata?.get("name") as? String)
                         val fallbackName = userMetaName?.ifBlank { null }
                             ?: currentSession.email.substringBefore("@").ifBlank { "UNIMAID Student" }
-                        val recoverProfile = Profile(
+                        val recoverProfile = CreateProfileDto(
                             id = user.id,
                             fullName = resolvedFullName.ifBlank { fallbackName },
                             department = (user.userMetadata?.get("department") as? String),
-                            faculty = (user.userMetadata?.get("faculty") as? String),
                             level = (user.userMetadata?.get("level") as? String) ?: "100L",
                             matricNumber = (user.userMetadata?.get("matric_number") as? String),
-                            isVerified = false,
-                            isSuspended = false,
-                            email = user.email ?: currentSession.email,
-                            phoneNumber = (user.userMetadata?.get("phone_number") as? String)
+                            isVerified = false
                         )
                         val insResp = restApi.insertProfile(recoverProfile)
                         if (insResp.isSuccessful && insResp.body()?.isNotEmpty() == true) {
                             val created = insResp.body()!!.first()
                             isVerified = created.isVerified
                             isProfileComplete = created.isComplete
-                            resolvedFullName = created.fullName ?: recoverProfile.fullName ?: fallbackName
+                            resolvedFullName = created.fullName ?: recoverProfile.fullName
                             verificationStatus = if (created.isVerified) "VERIFIED" else "UNVERIFIED"
                         }
                     }
 
-                    // Also check latest verification request
+                    // Also check latest verification request with user_id
                     try {
-                        val verifResp = restApi.getVerificationRequests(filters = mapOf("student_id" to "eq.${user.id}"))
+                        val verifResp = restApi.getVerificationRequests(filters = mapOf("user_id" to "eq.${user.id}"))
                         if (verifResp.isSuccessful) {
                             val latestReq = verifResp.body()?.firstOrNull()
                             if (latestReq != null) {
@@ -455,7 +446,10 @@ class AuthRepositoryImpl(
 
                     val roleResp = restApi.getAdminRoleForUser("eq.${user.id}")
                     if (roleResp.isSuccessful && roleResp.body()?.isNotEmpty() == true) {
-                        isAdmin = true
+                        val role = roleResp.body()!!.first()
+                        if (role.role.equals("ADMIN", ignoreCase = true) || role.role.equals("SUPER_ADMIN", ignoreCase = true)) {
+                            isAdmin = true
+                        }
                     }
                 } catch (e: Throwable) {
                     // Non-fatal

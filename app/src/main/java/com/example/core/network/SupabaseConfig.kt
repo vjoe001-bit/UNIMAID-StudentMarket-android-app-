@@ -107,5 +107,6 @@ object SupabaseConfig {
         const val ORDERS = "realtime:public:orders"
         const val CONVERSATIONS = "realtime:public:conversations"
         const val LISTINGS = "realtime:public:listings"
+        const val REVIEWS = "realtime:public:reviews"
     }
 }

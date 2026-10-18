@@ -24,10 +24,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,13 +40,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Handshake
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -190,7 +204,7 @@ fun PostListingScreen(
     var locationError by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
     var progressStatusText by remember { mutableStateOf("") }
-    var isCategoryDropdownExpanded by remember { mutableStateOf(false) }
+    var showCategorySheet by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showDiscardConfirmation by remember { mutableStateOf(false) }
 
@@ -754,7 +768,7 @@ fun PostListingScreen(
 
             Spacer(modifier = Modifier.height(AppSpacing.md))
 
-            // Category Selection Dropdown
+            // Category Selection Button
             val availableCategories = if (uiState.categories.isNotEmpty()) uiState.categories else com.example.data.models.DefaultCategories.LIST
             val selectedCategory = availableCategories.find { it.id == selectedCategoryId }
             Column {
@@ -764,104 +778,99 @@ fun PostListingScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                ExposedDropdownMenuBox(
-                    expanded = isCategoryDropdownExpanded,
-                    onExpandedChange = { if (!isSubmitting) isCategoryDropdownExpanded = it },
-                    modifier = Modifier.fillMaxWidth()
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(AppRadius.md)
+                        .clickable(enabled = !isSubmitting) {
+                            showCategorySheet = true
+                        }
+                        .testTag("select_category_button"),
+                    shape = AppRadius.md,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    border = if (categoryError != null) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error) else null
                 ) {
-                    Card(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = !isSubmitting)
-                            .clip(AppRadius.md)
-                            .clickable(enabled = !isSubmitting) {
-                                isCategoryDropdownExpanded = !isCategoryDropdownExpanded
-                            }
-                            .testTag("select_category_button"),
-                        shape = AppRadius.md,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = if (categoryError != null) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error) else null
+                            .padding(AppSpacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(AppSpacing.md),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        if (selectedCategory != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Category,
+                                    imageVector = if (selectedCategory != null) getCategoryIcon(selectedCategory.name) else Icons.Default.Category,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
+                            }
+                            Spacer(modifier = Modifier.width(AppSpacing.sm))
+                            Column {
                                 Text(
                                     text = selectedCategory?.name ?: "Select Category",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = if (selectedCategory != null) FontWeight.SemiBold else FontWeight.Normal,
                                     color = if (selectedCategory != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCategoryDropdownExpanded)
-                        }
-                    }
-
-                    ExposedDropdownMenu(
-                        expanded = isCategoryDropdownExpanded,
-                        onDismissRequest = { isCategoryDropdownExpanded = false }
-                    ) {
-                        availableCategories.forEach { cat ->
-                            val isSelected = cat.id == selectedCategoryId
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            text = cat.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (!cat.description.isNullOrBlank()) {
-                                            Text(
-                                                text = cat.description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Category,
-                                        contentDescription = null,
-                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                if (selectedCategory != null && !selectedCategory.description.isNullOrBlank()) {
+                                    Text(
+                                        text = selectedCategory.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
                                     )
-                                },
-                                trailingIcon = if (isSelected) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                } else null,
-                                onClick = {
-                                    selectedCategoryId = cat.id
-                                    categoryError = null
-                                    isCategoryDropdownExpanded = false
                                 }
-                            )
+                            }
                         }
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = showCategorySheet)
                     }
                 }
+
+                // Quick-select chips for popular categories
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    availableCategories.take(5).forEach { cat ->
+                        val isSelected = cat.id == selectedCategoryId
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                selectedCategoryId = if (isSelected) null else cat.id
+                                if (categoryError != null) categoryError = null
+                            },
+                            label = { Text(cat.name, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = if (isSelected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            } else null
+                        )
+                    }
+                }
+
                 if (categoryError != null) {
                     Text(
                         text = categoryError!!,
@@ -1135,5 +1144,183 @@ fun PostListingScreen(
                 }
             }
         )
+    }
+
+    // Category Selection Modal Bottom Sheet
+    if (showCategorySheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val availableCategories = if (uiState.categories.isNotEmpty()) uiState.categories else com.example.data.models.DefaultCategories.LIST
+        var categorySearchQuery by remember { mutableStateOf("") }
+        val filteredCategories = remember(availableCategories, categorySearchQuery) {
+            if (categorySearchQuery.isBlank()) {
+                availableCategories
+            } else {
+                availableCategories.filter {
+                    it.name.contains(categorySearchQuery, ignoreCase = true) ||
+                        (it.description?.contains(categorySearchQuery, ignoreCase = true) == true)
+                }
+            }
+        }
+
+        ModalBottomSheet(
+            onDismissRequest = { showCategorySheet = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.lg)
+                    .padding(bottom = AppSpacing.xl)
+                    .navigationBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Select Category",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Choose the best category for your UNIMAID listing",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = { showCategorySheet = false }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(AppSpacing.md))
+
+                // Search field for fast filtering
+                UnimaidTextField(
+                    value = categorySearchQuery,
+                    onValueChange = { categorySearchQuery = it },
+                    placeholder = "Search categories (e.g. Books, Tech, Hostel)...",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "input_category_search"
+                )
+
+                Spacer(modifier = Modifier.height(AppSpacing.md))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredCategories) { cat ->
+                        val isSelected = cat.id == selectedCategoryId
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(AppRadius.md)
+                                .clickable {
+                                    selectedCategoryId = cat.id
+                                    categoryError = null
+                                    showCategorySheet = false
+                                }
+                                .testTag("category_option_${cat.id}"),
+                            shape = AppRadius.md,
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                }
+                            ),
+                            border = if (isSelected) {
+                                androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                            } else null
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(AppSpacing.md),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = getCategoryIcon(cat.name),
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(AppSpacing.md))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = cat.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (!cat.description.isNullOrBlank()) {
+                                        Text(
+                                            text = cat.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getCategoryIcon(name: String): androidx.compose.ui.graphics.vector.ImageVector {
+    val lower = name.lowercase()
+    return when {
+        lower.contains("elec") || lower.contains("phone") || lower.contains("device") || lower.contains("tech") || lower.contains("laptop") -> Icons.Default.Devices
+        lower.contains("fashion") || lower.contains("cloth") || lower.contains("shoe") || lower.contains("wear") -> Icons.Default.Checkroom
+        lower.contains("edu") || lower.contains("book") || lower.contains("textbook") || lower.contains("acad") -> Icons.Default.MenuBook
+        lower.contains("hostel") || lower.contains("room") || lower.contains("furniture") -> Icons.Default.Home
+        lower.contains("food") || lower.contains("groc") || lower.contains("snack") || lower.contains("drink") -> Icons.Default.Restaurant
+        lower.contains("beauty") || lower.contains("personal") || lower.contains("care") -> Icons.Default.Face
+        lower.contains("sport") || lower.contains("fit") || lower.contains("gym") -> Icons.Default.FitnessCenter
+        lower.contains("auto") || lower.contains("car") || lower.contains("vehicle") -> Icons.Default.DirectionsCar
+        lower.contains("serv") || lower.contains("repair") || lower.contains("tutor") -> Icons.Default.Build
+        else -> Icons.Default.Category
     }
 }

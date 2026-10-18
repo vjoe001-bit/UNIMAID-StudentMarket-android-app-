@@ -91,3 +91,37 @@ data class OrderStatusHistory(
     val displayStatus: String
         get() = newStatus.ifBlank { status ?: "PENDING" }
 }
+
+@JsonClass(generateAdapter = true)
+data class CreateOrderDto(
+    val id: String,
+    @Json(name = "buyer_id")
+    val buyerId: String,
+    @Json(name = "seller_id")
+    val sellerId: String,
+    @Json(name = "listing_id")
+    val listingId: String? = null,
+    val quantity: Int = 1,
+    @Json(name = "total_amount")
+    val totalAmount: Double,
+    val status: String = "PENDING",
+    @Json(name = "meeting_location")
+    val meetingLocation: String? = "UNIMAID Main Campus",
+    @Json(name = "buyer_note")
+    val buyerNote: String? = null,
+    @Json(name = "seller_note")
+    val sellerNote: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PlaceOrderRpcParams(
+    @Json(name = "p_listing_id")
+    val listingId: String,
+    @Json(name = "p_quantity")
+    val quantity: Int = 1,
+    @Json(name = "p_meeting_location")
+    val meetingLocation: String? = "UNIMAID Main Campus",
+    @Json(name = "p_buyer_note")
+    val buyerNote: String? = null
+)
+

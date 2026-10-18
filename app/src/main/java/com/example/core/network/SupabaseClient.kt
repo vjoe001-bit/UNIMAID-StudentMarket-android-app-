@@ -48,7 +48,15 @@ object SupabaseClient {
     }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.HEADERS
+        level = if (com.example.BuildConfig.DEBUG) {
+            HttpLoggingInterceptor.Level.BASIC
+        } else {
+            HttpLoggingInterceptor.Level.NONE
+        }
+        redactHeader("Authorization")
+        redactHeader("apikey")
+        redactHeader("Cookie")
+        redactHeader("Set-Cookie")
     }
 
     val okHttpClient: OkHttpClient by lazy {

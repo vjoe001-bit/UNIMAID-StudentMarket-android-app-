@@ -22,6 +22,8 @@ import com.example.data.repository.FavoritesRepository
 import com.example.data.repository.FavoritesRepositoryImpl
 import com.example.data.repository.MarketplaceRepository
 import com.example.data.repository.MarketplaceRepositoryImpl
+import com.example.core.network.SupabaseClient
+import com.example.core.realtime.SupabaseRealtimeManager
 import com.example.data.repository.StorageRepository
 import com.example.data.repository.StorageRepositoryImpl
 import kotlinx.coroutines.Job
@@ -71,17 +73,36 @@ class MarketplaceViewModel(
     private val marketplaceRepository: MarketplaceRepository = MarketplaceRepositoryImpl(),
     private val favoritesRepository: FavoritesRepository = FavoritesRepositoryImpl(),
     private val cartRepository: CartRepository = CartRepositoryImpl(),
-    private val storageRepository: StorageRepository = StorageRepositoryImpl()
+    private val storageRepository: StorageRepository = StorageRepositoryImpl(),
+    private val realtimeManager: SupabaseRealtimeManager = SupabaseRealtimeManager(SupabaseClient.okHttpClient)
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MarketplaceUiState())
     val uiState: StateFlow<MarketplaceUiState> = _uiState.asStateFlow()
 
     private var searchJob: Job? = null
+    private var realtimeJob: Job? = null
     private var currentUserId: String? = null
 
     init {
         loadInitialData()
+        setupRealtime()
+    }
+
+    private fun setupRealtime() {
+        realtimeManager.connect()
+        realtimeManager.subscribeToListings()
+        realtimeJob?.cancel()
+        realtimeJob = viewModelScope.launch {
+            realtimeManager.listingsEvents.collect {
+                // When any student posts, edits or updates an item, sync feed live
+                loadHomeFeedInternal()
+                loadMarketplaceListingsInternal()
+                currentUserId?.let { uid ->
+                    loadSellerListings(uid)
+                }
+            }
+        }
     }
 
     /**
@@ -625,7 +646,20 @@ class MarketplaceViewModel(
         // Fetch full listing with images
         val fullListing = marketplaceRepository.getListingById(listingId)
         val finalResult = if (fullListing is SupabaseResult.Success) fullListing.data else createdListing
-        _uiState.value = _uiState.value.copy(userFeedbackMessage = "Item published successfully!")
+
+        val currentMarketList = _uiState.value.marketplaceListings.toMutableList()
+        if (currentMarketList.none { it.id == finalResult.id }) {
+            currentMarketList.add(0, finalResult)
+        }
+        val currentRecent = _uiState.value.recentListings.toMutableList()
+        if (currentRecent.none { it.id == finalResult.id }) {
+            currentRecent.add(0, finalResult)
+        }
+        _uiState.value = _uiState.value.copy(
+            marketplaceListings = currentMarketList,
+            recentListings = currentRecent,
+            userFeedbackMessage = "Item published successfully!"
+        )
         return SupabaseResult.Success(finalResult)
     }
 
@@ -764,5 +798,11 @@ class MarketplaceViewModel(
             _uiState.value = _uiState.value.copy(userFeedbackMessage = "Listing removed successfully.")
         }
         return result
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        realtimeJob?.cancel()
+        realtimeManager.disconnect()
     }
 }

@@ -5,8 +5,15 @@ import com.example.data.models.CampusService
 import com.example.data.models.CartItem
 import com.example.data.models.Category
 import com.example.data.models.Conversation
+import com.example.data.models.CreateConversationDto
 import com.example.data.models.CreateListingDto
 import com.example.data.models.CreateListingImageDto
+import com.example.data.models.CreateMessageDto
+import com.example.data.models.CreateNotificationDto
+import com.example.data.models.CreateOrderDto
+import com.example.data.models.CreateProfileDto
+import com.example.data.models.CreateReviewDto
+import com.example.data.models.CreateVerificationRequestDto
 import com.example.data.models.Favorite
 import com.example.data.models.Listing
 import com.example.data.models.ListingImage
@@ -15,6 +22,7 @@ import com.example.data.models.Notification
 import com.example.data.models.Order
 import com.example.data.models.OrderItem
 import com.example.data.models.OrderStatusHistory
+import com.example.data.models.PlaceOrderRpcParams
 import com.example.data.models.Profile
 import com.example.data.models.Report
 import com.example.data.models.Review
@@ -47,7 +55,7 @@ interface SupabaseRestApi {
 
     @POST("profiles")
     suspend fun insertProfile(
-        @Body profile: Profile,
+        @Body profile: CreateProfileDto,
         @Query("on_conflict") onConflict: String = "id",
         @Header("Prefer") prefer: String = "resolution=merge-duplicates,return=representation"
     ): Response<List<Profile>>
@@ -63,7 +71,7 @@ interface SupabaseRestApi {
     @GET("categories")
     suspend fun getCategories(
         @Query("is_active") isActive: String = "eq.true",
-        @Query("order") order: String = "display_order.asc,name.asc",
+        @Query("order") order: String = "name.asc",
         @Query("select") select: String = "*"
     ): Response<List<Category>>
 
@@ -142,7 +150,7 @@ interface SupabaseRestApi {
 
     @POST("verification_requests")
     suspend fun submitVerificationRequest(
-        @Body request: VerificationRequest,
+        @Body request: CreateVerificationRequestDto,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<VerificationRequest>>
 
@@ -207,9 +215,14 @@ interface SupabaseRestApi {
 
     @POST("orders")
     suspend fun createOrder(
-        @Body order: Order,
+        @Body order: CreateOrderDto,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<Order>>
+
+    @POST("rpc/place_order_atomic")
+    suspend fun placeOrderAtomic(
+        @Body params: PlaceOrderRpcParams
+    ): Response<Map<String, Any?>>
 
     @PATCH("orders")
     suspend fun updateOrder(
@@ -240,7 +253,7 @@ interface SupabaseRestApi {
 
     @POST("conversations")
     suspend fun createConversation(
-        @Body conversation: Conversation,
+        @Body conversation: CreateConversationDto,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<Conversation>>
 
@@ -260,7 +273,7 @@ interface SupabaseRestApi {
 
     @POST("messages")
     suspend fun sendMessage(
-        @Body message: Message,
+        @Body message: CreateMessageDto,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<Message>>
 
@@ -286,11 +299,24 @@ interface SupabaseRestApi {
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<Notification>>
 
-    @POST("notifications")
-    suspend fun createNotification(
-        @Body notification: Notification,
+    @PATCH("notifications")
+    suspend fun updateNotifications(
+        @Query("user_id") userIdFilter: String,
+        @Body updates: Map<String, Any?>,
         @Header("Prefer") prefer: String = "return=representation"
     ): Response<List<Notification>>
+
+    @POST("notifications")
+    suspend fun createNotification(
+        @Body notification: CreateNotificationDto,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<Notification>>
+
+    @DELETE("notifications")
+    suspend fun deleteNotification(
+        @Query("id") idFilter: String,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<Unit>
 
     // FAVORITES
     @GET("favorites")
@@ -315,9 +341,48 @@ interface SupabaseRestApi {
     // REVIEWS
     @GET("reviews")
     suspend fun getReviews(
-        @Query("target_user_id") targetUserFilter: String,
-        @Query("select") select: String = "*"
+        @Query("select") select: String = "id,order_id,listing_id,reviewer_id,reviewed_user_id,rating,comment,created_at,reviewer:profiles!reviews_reviewer_id_fkey(id,full_name,avatar_url,is_verified,department,level),listing:listings(id,name,price)",
+        @Query("order") order: String = "created_at.desc",
+        @QueryMap filters: Map<String, String> = emptyMap()
     ): Response<List<Review>>
+
+    @GET("reviews")
+    suspend fun getReviewsForSeller(
+        @Query("reviewed_user_id") reviewedUserFilter: String,
+        @Query("select") select: String = "id,order_id,listing_id,reviewer_id,reviewed_user_id,rating,comment,created_at,reviewer:profiles!reviews_reviewer_id_fkey(id,full_name,avatar_url,is_verified,department,level),listing:listings(id,name,price)",
+        @Query("order") order: String = "created_at.desc"
+    ): Response<List<Review>>
+
+    @GET("reviews")
+    suspend fun getReviewsForListing(
+        @Query("listing_id") listingFilter: String,
+        @Query("select") select: String = "id,order_id,listing_id,reviewer_id,reviewed_user_id,rating,comment,created_at,reviewer:profiles!reviews_reviewer_id_fkey(id,full_name,avatar_url,is_verified,department,level),listing:listings(id,name,price)",
+        @Query("order") order: String = "created_at.desc"
+    ): Response<List<Review>>
+
+    @GET("reviews")
+    suspend fun getReviewForOrder(
+        @Query("order_id") orderFilter: String,
+        @Query("select") select: String = "id,order_id,listing_id,reviewer_id,reviewed_user_id,rating,comment,created_at,reviewer:profiles!reviews_reviewer_id_fkey(id,full_name,avatar_url,is_verified,department,level),listing:listings(id,name,price)"
+    ): Response<List<Review>>
+
+    @POST("reviews")
+    suspend fun createReview(
+        @Body review: CreateReviewDto,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<Review>>
+
+    @PATCH("reviews")
+    suspend fun updateReview(
+        @Query("id") idFilter: String,
+        @Body updates: Map<String, Any?>,
+        @Header("Prefer") prefer: String = "return=representation"
+    ): Response<List<Review>>
+
+    @DELETE("reviews")
+    suspend fun deleteReview(
+        @Query("id") idFilter: String
+    ): Response<Unit>
 
     // REPORTS
     @POST("reports")

@@ -429,7 +429,7 @@ fun MarketplaceScreen(
                             val firstImage = listing.images.firstOrNull()?.imageUrl
 
                             UnimaidProductCard(
-                                title = listing.title,
+                                title = listing.displayTitle,
                                 price = "₦${"%,.0f".format(listing.price)}",
                                 imageUrl = firstImage,
                                 condition = ItemCondition.format(listing.condition),

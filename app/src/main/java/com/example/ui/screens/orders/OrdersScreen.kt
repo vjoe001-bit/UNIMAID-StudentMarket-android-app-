@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
@@ -150,6 +151,10 @@ fun OrdersScreen(
     var orderToDecline by remember { mutableStateOf<Order?>(null) }
     var orderToCancel by remember { mutableStateOf<Order?>(null) }
     var orderToComplete by remember { mutableStateOf<Order?>(null) }
+    var orderToReview by remember { mutableStateOf<Order?>(null) }
+
+    val reviewRepository: com.example.data.repository.ReviewRepository = remember { com.example.data.repository.ReviewRepositoryImpl() }
+    var reviewedOrderIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     // Action In-Progress state
     var actionInProgressOrderId by remember { mutableStateOf<String?>(null) }
@@ -162,7 +167,21 @@ fun OrdersScreen(
         coroutineScope.launch {
             isLoading = true
             when (val buyerRes = orderRepository.getOrdersForUser(currentUserId, asBuyerOnly = true)) {
-                is SupabaseResult.Success -> buyerOrders = buyerRes.data
+                is SupabaseResult.Success -> {
+                    buyerOrders = buyerRes.data
+                    // Query existing reviews for completed orders
+                    val completedOrders = buyerRes.data.filter { it.status.equals("COMPLETED", ignoreCase = true) }
+                    val reviewedIds = mutableSetOf<String>()
+                    completedOrders.forEach { ord ->
+                        when (val r = reviewRepository.getReviewForOrder(ord.id)) {
+                            is SupabaseResult.Success -> {
+                                if (r.data != null) reviewedIds.add(ord.id)
+                            }
+                            else -> {}
+                        }
+                    }
+                    reviewedOrderIds = reviewedIds
+                }
                 else -> {}
             }
             when (val sellerRes = orderRepository.getOrdersForUser(currentUserId, asSellerOnly = true)) {
@@ -446,7 +465,9 @@ fun OrdersScreen(
                                 onDeclinePrompt = { orderToDecline = order },
                                 onArrangeMeetingPrompt = { orderToArrangeMeeting = order },
                                 onCancelPrompt = { orderToCancel = order },
-                                onCompletePrompt = { orderToComplete = order }
+                                onCompletePrompt = { orderToComplete = order },
+                                hasReviewed = reviewedOrderIds.contains(order.id),
+                                onReviewPrompt = { orderToReview = order }
                             )
                         }
                     }
@@ -605,6 +626,21 @@ fun OrdersScreen(
             }
         )
     }
+
+    // Write Review Bottom Sheet
+    orderToReview?.let { ord ->
+        if (!currentUserId.isNullOrBlank()) {
+            com.example.ui.screens.reviews.WriteReviewBottomSheet(
+                order = ord,
+                currentUserId = currentUserId,
+                onDismiss = { orderToReview = null },
+                onReviewSubmitted = {
+                    orderToReview = null
+                    loadAllOrders()
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -618,7 +654,9 @@ private fun OrderCardItem(
     onDeclinePrompt: () -> Unit,
     onArrangeMeetingPrompt: () -> Unit,
     onCancelPrompt: () -> Unit,
-    onCompletePrompt: () -> Unit
+    onCompletePrompt: () -> Unit,
+    hasReviewed: Boolean = false,
+    onReviewPrompt: () -> Unit = {}
 ) {
     val items = order.effectiveItems
     val firstItem = items.firstOrNull()
@@ -684,7 +722,7 @@ private fun OrderCardItem(
                     if (!imageUrl.isNullOrBlank()) {
                         AsyncImage(
                             model = imageUrl,
-                            contentDescription = listing?.title ?: "Item",
+                            contentDescription = listing?.displayTitle ?: "Item",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
@@ -701,7 +739,7 @@ private fun OrderCardItem(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = listing?.title ?: "Campus Item",
+                        text = listing?.displayTitle ?: "Campus Item",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
@@ -936,24 +974,67 @@ private fun OrderCardItem(
                         }
                     }
                     isCompleted -> {
-                        Row(
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = VerifiedGreen,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Handover Verified & Completed",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = VerifiedGreen,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = VerifiedGreen,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Handover Verified & Completed",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = VerifiedGreen,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            if (hasReviewed) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = AppRadius.sm,
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 12.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = com.example.core.theme.UnimaidGold,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Review Submitted • Thank you!",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            } else {
+                                UnimaidPillButton(
+                                    text = "★ Rate & Review Seller",
+                                    onClick = onReviewPrompt,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("rate_seller_button_${order.id}"),
+                                    containerColor = com.example.core.theme.UnimaidGold,
+                                    contentColor = Color.Black
+                                )
+                            }
                         }
                     }
                 }

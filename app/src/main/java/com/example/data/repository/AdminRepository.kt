@@ -32,10 +32,10 @@ class AdminRepositoryImpl(
         if (AdminConfig.isDesignatedAdmin(userId, null)) {
             return SupabaseResult.Success(
                 AdminRole(
-                    id = "admin-role-$userId",
+                    id = "designated-admin-$userId",
                     userId = userId,
                     role = "SUPER_ADMIN",
-                    permissions = listOf("ALL", "VERIFICATION_REVIEW", "REPORT_MODERATION", "USER_MANAGEMENT")
+                    permissions = listOf("ALL")
                 )
             )
         }

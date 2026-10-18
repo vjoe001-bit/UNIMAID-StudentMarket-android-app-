@@ -14,8 +14,43 @@
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+-keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,*Annotation*
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Moshi and Kotlin reflection rules
+-keepclassmembers class * {
+    @com.squareup.moshi.Json <fields>;
+    @com.squareup.moshi.JsonClass <fields>;
+}
+-keep @com.squareup.moshi.JsonClass class * { *; }
+-keep class com.squareup.moshi.** { *; }
+-dontwarn com.squareup.moshi.**
+
+# Keep all project data models and DTOs
+-keep class com.example.data.models.** { *; }
+-keepclassmembers class com.example.data.models.** { *; }
+-keep class com.example.core.network.** { *; }
+-keepclassmembers class com.example.core.network.** { *; }
+
+# Retrofit rules
+-keep class retrofit2.** { *; }
+-keepclasseswithmembers class * {
+    @retrofit2.http.* <methods>;
+}
+-dontwarn retrofit2.**
+
+# OkHttp rules
+-keepattributes Signature
+-keepattributes *Annotation*
+-keepclassmembers class okhttp3.OkHttpClient { *; }
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
+# Kotlin Coroutines
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-keepclassmembernames class kotlinx.coroutines.** {
+    volatile <fields>;
+}
+-dontwarn kotlinx.coroutines.**
+

@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -40,7 +41,16 @@ data class RealtimeEvent(
     val table: String?,
     val eventType: String?, // INSERT, UPDATE, DELETE
     val payload: JSONObject
-)
+) {
+    val record: JSONObject?
+        get() = payload.optJSONObject("data")?.optJSONObject("record")
+            ?: payload.optJSONObject("record")
+            ?: payload.optJSONObject("data")
+
+    val oldRecord: JSONObject?
+        get() = payload.optJSONObject("data")?.optJSONObject("old_record")
+            ?: payload.optJSONObject("old_record")
+}
 
 /**
  * Realtime subscription manager for UNIMAID StudentMarket.
@@ -62,11 +72,11 @@ class SupabaseRealtimeManager(
     private val _events = MutableSharedFlow<RealtimeEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<RealtimeEvent> = _events.asSharedFlow()
 
-    val messagesEvents: Flow<RealtimeEvent> = _events.filter { it.table == "messages" }
-    val notificationsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "notifications" }
-    val ordersEvents: Flow<RealtimeEvent> = _events.filter { it.table == "orders" }
-    val conversationsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "conversations" }
-    val listingsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "listings" }
+    val messagesEvents: Flow<RealtimeEvent> = _events.filter { it.table == "messages" || it.topic.contains("messages") }
+    val notificationsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "notifications" || it.topic.contains("notifications") }
+    val ordersEvents: Flow<RealtimeEvent> = _events.filter { it.table == "orders" || it.topic.contains("orders") }
+    val conversationsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "conversations" || it.topic.contains("conversations") }
+    val listingsEvents: Flow<RealtimeEvent> = _events.filter { it.table == "listings" || it.topic.contains("listings") }
 
     private val subscribedTopics = mutableSetOf<String>()
 
@@ -121,23 +131,55 @@ class SupabaseRealtimeManager(
     fun subscribeToOrders() = subscribeToChannel(SupabaseConfig.RealtimeTopics.ORDERS)
     fun subscribeToConversations() = subscribeToChannel(SupabaseConfig.RealtimeTopics.CONVERSATIONS)
     fun subscribeToListings() = subscribeToChannel(SupabaseConfig.RealtimeTopics.LISTINGS)
+    fun subscribeToReviews() = subscribeToChannel(SupabaseConfig.RealtimeTopics.REVIEWS)
 
     private fun sendJoinTopic(ws: WebSocket, topic: String) {
         val ref = refCounter.incrementAndGet().toString()
+        val tableName = topic.substringAfterLast(":")
+        val token = com.example.core.network.SupabaseClient.getAccessToken()?.takeIf { it.isNotBlank() }
+            ?: SupabaseConfig.anonKey
+        
+        val postgresChanges = JSONArray().apply {
+            put(JSONObject().apply {
+                put("event", "*")
+                put("schema", "public")
+                if (tableName.isNotBlank()) {
+                    put("table", tableName)
+                }
+            })
+        }
+
         val joinPayload = JSONObject().apply {
             put("topic", topic)
             put("event", "phx_join")
             put("payload", JSONObject().apply {
+                put("access_token", token)
+                put("user_token", token)
                 put("config", JSONObject().apply {
                     put("broadcast", JSONObject().apply { put("ack", false); put("self", false) })
                     put("presence", JSONObject().apply { put("key", "") })
-                    put("postgres_changes", org.json.JSONArray())
+                    put("postgres_changes", postgresChanges)
                 })
             })
             put("ref", ref)
         }
         ws.send(joinPayload.toString())
-        Log.d(tag, "Joined topic: $topic")
+        Log.d(tag, "Joined topic: $topic with postgres_changes for table: $tableName")
+    }
+
+    fun updateAccessToken(token: String) {
+        webSocket?.let { ws ->
+            val ref = refCounter.incrementAndGet().toString()
+            val payload = JSONObject().apply {
+                put("topic", "realtime")
+                put("event", "access_token")
+                put("payload", JSONObject().apply {
+                    put("access_token", token)
+                })
+                put("ref", ref)
+            }
+            ws.send(payload.toString())
+        }
     }
 
     private fun startHeartbeat() {
@@ -170,7 +212,12 @@ class SupabaseRealtimeManager(
             val payload = json.optJSONObject("payload") ?: JSONObject()
 
             val table = payload.optJSONObject("data")?.optString("table")
+                ?: payload.optString("table")
+                ?: topic.substringAfterLast(":").takeIf { it != topic }
+
             val type = payload.optJSONObject("data")?.optString("type")
+                ?: payload.optString("type")
+                ?: event
 
             val realtimeEvent = RealtimeEvent(
                 topic = topic,

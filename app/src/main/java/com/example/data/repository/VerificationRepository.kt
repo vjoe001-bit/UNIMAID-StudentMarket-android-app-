@@ -4,7 +4,9 @@ import com.example.core.network.SupabaseClient
 import com.example.core.network.SupabaseErrorHandler
 import com.example.core.network.SupabaseResult
 import com.example.core.network.rest.SupabaseRestApi
+import com.example.data.models.CreateVerificationRequestDto
 import com.example.data.models.VerificationRequest
+import java.util.UUID
 
 interface VerificationRepository {
     suspend fun getVerificationStatus(studentId: String): SupabaseResult<VerificationRequest?>
@@ -33,7 +35,14 @@ class VerificationRepositoryImpl(
 
     override suspend fun submitVerification(request: VerificationRequest): SupabaseResult<VerificationRequest> {
         return try {
-            val response = restApi.submitVerificationRequest(request)
+            val dto = CreateVerificationRequestDto(
+                id = if (request.id.isNotBlank()) request.id else UUID.randomUUID().toString(),
+                userId = request.studentId,
+                matricNumber = request.matricNumber,
+                documentUrl = request.documentUrl,
+                status = "PENDING"
+            )
+            val response = restApi.submitVerificationRequest(dto)
             if (response.isSuccessful && response.body() != null) {
                 val created = response.body()!!.firstOrNull() ?: request
                 SupabaseResult.Success(created)

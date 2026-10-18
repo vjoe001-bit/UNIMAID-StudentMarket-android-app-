@@ -20,6 +20,7 @@ import com.example.ui.screens.categories.CategoriesScreen
 import com.example.ui.screens.details.ProductDetailsScreen
 import com.example.ui.screens.favorites.FavoritesScreen
 import com.example.ui.screens.main.MainScreen
+import com.example.ui.screens.notifications.NotificationsScreen
 import com.example.ui.screens.orders.OrdersScreen
 import com.example.ui.screens.placeholder.PlaceholderScreen
 import com.example.ui.screens.profile.ProfileCompletionScreen
@@ -30,6 +31,7 @@ import com.example.ui.screens.seller.SellerHubScreen
 import com.example.ui.screens.verification.StudentVerificationScreen
 import com.example.ui.screens.welcome.WelcomeScreen
 import com.example.ui.viewmodels.MarketplaceViewModel
+import com.example.ui.viewmodels.NotificationViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalFocusManager
@@ -48,6 +50,7 @@ fun AppNavigation(
 ) {
     val sessionState by authRepository.sessionState.collectAsState()
     val marketplaceViewModel: MarketplaceViewModel = viewModel()
+    val notificationViewModel: NotificationViewModel = viewModel()
     val focusManager = LocalFocusManager.current
 
     DisposableEffect(navController) {
@@ -177,7 +180,9 @@ fun AppNavigation(
                 onNavigateToCreateListing = { navController.navigate(NavRoutes.CreateListing.route) },
                 onNavigateToEditListing = { id -> navController.navigate(NavRoutes.EditListing.createRoute(id)) },
                 onNavigateToMyListings = { navController.navigate(NavRoutes.MyListings.route) },
-                onNavigateToOrders = { navController.navigate(NavRoutes.Orders.createRoute("purchases")) }
+                onNavigateToOrders = { navController.navigate(NavRoutes.Orders.createRoute("purchases")) },
+                onNavigateToSellerReviews = { sellerId -> navController.navigate(NavRoutes.SellerReviews.createRoute(sellerId)) },
+                notificationViewModel = notificationViewModel
             )
         }
 
@@ -198,7 +203,24 @@ fun AppNavigation(
                     navController.navigate(NavRoutes.EditListing.createRoute(id))
                 },
                 onNavigateToCart = { navController.navigate(NavRoutes.Cart.route) },
-                onNavigateToOrders = { navController.navigate(NavRoutes.Orders.createRoute("purchases")) }
+                onNavigateToOrders = { navController.navigate(NavRoutes.Orders.createRoute("purchases")) },
+                onNavigateToSellerReviews = { sellerId ->
+                    navController.navigate(NavRoutes.SellerReviews.createRoute(sellerId))
+                }
+            )
+        }
+
+        // Seller Reviews & Reputation Screen
+        composable(NavRoutes.SellerReviews.route) { backStackEntry ->
+            val sellerId = backStackEntry.arguments?.getString("sellerId") ?: ""
+            val currentUid = (sessionState as? SessionState.Authenticated)?.session?.userId
+            com.example.ui.screens.reviews.SellerReviewsScreen(
+                sellerId = sellerId,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToProduct = { id ->
+                    navController.navigate(NavRoutes.ProductDetails.createRoute(id))
+                },
+                currentUserId = currentUid
             )
         }
 
@@ -244,10 +266,25 @@ fun AppNavigation(
 
         // Notifications Screen
         composable(NavRoutes.Notifications.route) {
-            PlaceholderScreen(
-                title = "Notifications",
-                subtitle = "Subscribed to realtime notifications table in Supabase. Ready for Phase B.",
-                onNavigateBack = { navController.popBackStack() }
+            NotificationsScreen(
+                authRepository = authRepository,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToConversation = { recipientId, listingId ->
+                    navController.navigate(NavRoutes.Messages.createRoute(recipientId, listingId))
+                },
+                onNavigateToOrders = { initialTab ->
+                    navController.navigate(NavRoutes.Orders.createRoute(initialTab))
+                },
+                onNavigateToProductDetails = { listingId ->
+                    navController.navigate(NavRoutes.ProductDetails.createRoute(listingId))
+                },
+                onNavigateToVerification = {
+                    navController.navigate(NavRoutes.StudentVerification.route)
+                },
+                onNavigateToLogin = {
+                    navController.navigate(NavRoutes.Login.route)
+                },
+                notificationViewModel = notificationViewModel
             )
         }
 
@@ -319,7 +356,8 @@ fun AppNavigation(
                 },
                 onNavigateToLogin = { navController.navigate(NavRoutes.Login.route) },
                 onNavigateToMyListings = { navController.navigate(NavRoutes.MyListings.route) },
-                onNavigateToSellerOrders = { navController.navigate(NavRoutes.Orders.createRoute("sales")) }
+                onNavigateToSellerOrders = { navController.navigate(NavRoutes.Orders.createRoute("sales")) },
+                onNavigateToSellerReviews = { sellerId -> navController.navigate(NavRoutes.SellerReviews.createRoute(sellerId)) }
             )
         }
 

@@ -4,9 +4,12 @@ import com.example.core.network.SupabaseClient
 import com.example.core.network.SupabaseErrorHandler
 import com.example.core.network.SupabaseResult
 import com.example.core.network.rest.SupabaseRestApi
+import com.example.data.models.CreateOrderDto
+import com.example.data.models.NotificationTypes
 import com.example.data.models.Order
 import com.example.data.models.OrderItem
 import com.example.data.models.OrderStatusHistory
+import com.example.data.models.PlaceOrderRpcParams
 import java.util.UUID
 
 /**
@@ -47,7 +50,50 @@ class OrderRepositoryImpl(
 
             val reqQuantity = if (order.quantity > 0) order.quantity else (items.firstOrNull()?.quantity ?: 1)
 
+            // Try server-side atomic order placement RPC first (locks listing, checks stock, authoritative price)
+            try {
+                val rpcResp = restApi.placeOrderAtomic(
+                    PlaceOrderRpcParams(
+                        listingId = targetListingId,
+                        quantity = reqQuantity,
+                        meetingLocation = order.meetingLocation ?: "UNIMAID Main Campus",
+                        buyerNote = order.buyerNote
+                    )
+                )
+                if (rpcResp.isSuccessful && rpcResp.body() != null) {
+                    val map = rpcResp.body()!!
+                    val createdId = map["id"]?.toString().orEmpty()
+                    if (createdId.isNotBlank()) {
+                        // Fetch full order with joined relations
+                        val fetchCreated = restApi.getOrderById("eq.$createdId")
+                        if (fetchCreated.isSuccessful && !fetchCreated.body().isNullOrEmpty()) {
+                            val createdOrder = fetchCreated.body()!!.first()
+
+                            // Notify seller of incoming request
+                            runCatching {
+                                notificationRepository.createNotification(
+                                    userId = createdOrder.sellerId,
+                                    title = "New Purchase Request",
+                                    message = "A student placed a handover request for ₦${"%,.0f".format(createdOrder.totalAmount)}.",
+                                    type = NotificationTypes.PURCHASE_REQUEST,
+                                    dataPayload = mapOf(
+                                        "order_id" to createdOrder.id,
+                                        "tab" to "sales",
+                                        "entity_id" to createdOrder.id
+                                    )
+                                )
+                            }
+                            return SupabaseResult.Success(createdOrder)
+                        }
+                    }
+                }
+            } catch (rpcEx: Throwable) {
+                // If RPC not available yet, fall back to direct verified insert
+            }
+
+            // Fallback: Validate listing from authoritative record
             val listingResp = restApi.getListingById("eq.$targetListingId")
+            val authoritativePrice: Double
             if (listingResp.isSuccessful && !listingResp.body().isNullOrEmpty()) {
                 val listing = listingResp.body()!!.first()
                 if (!listing.isAvailable || listing.status.equals("SOLD", ignoreCase = true) || listing.status.equals("DEACTIVATED", ignoreCase = true)) {
@@ -56,16 +102,28 @@ class OrderRepositoryImpl(
                 if (reqQuantity > listing.quantity) {
                     return SupabaseResult.Error("Item '${listing.displayTitle}' only has ${listing.quantity} remaining.")
                 }
+                authoritativePrice = listing.price
             } else {
                 return SupabaseResult.Error("The requested campus item could not be found.")
             }
 
-            // 2. Insert order directly into public.orders table
-            val orderToCreate = order.copy(
+            // 2. Authoritative server calculation of total amount
+            val authoritativeTotal = authoritativePrice * reqQuantity
+
+            // 3. Insert order using clean CreateOrderDto (no joined relation fields)
+            val orderDto = CreateOrderDto(
+                id = if (order.id.isNotBlank()) order.id else UUID.randomUUID().toString(),
+                buyerId = order.buyerId,
+                sellerId = order.sellerId,
                 listingId = targetListingId,
-                quantity = reqQuantity
+                quantity = reqQuantity,
+                totalAmount = authoritativeTotal,
+                status = "PENDING",
+                meetingLocation = order.meetingLocation ?: "UNIMAID Main Campus",
+                buyerNote = order.buyerNote,
+                sellerNote = null
             )
-            val response = restApi.createOrder(orderToCreate)
+            val response = restApi.createOrder(orderDto)
             if (response.isSuccessful && !response.body().isNullOrEmpty()) {
                 val createdOrder = response.body()!!.first()
 
@@ -86,8 +144,13 @@ class OrderRepositoryImpl(
                     notificationRepository.createNotification(
                         userId = order.sellerId,
                         title = "New Purchase Request",
-                        message = "A student placed a handover request for ₦${"%,.0f".format(order.totalAmount)}.",
-                        type = "ORDER"
+                        message = "A student placed a handover request for ₦${"%,.0f".format(authoritativeTotal)}.",
+                        type = NotificationTypes.PURCHASE_REQUEST,
+                        dataPayload = mapOf(
+                            "order_id" to createdOrder.id,
+                            "tab" to "sales",
+                            "entity_id" to createdOrder.id
+                        )
                     )
                 }
 
@@ -237,7 +300,12 @@ class OrderRepositoryImpl(
                         userId = recipientId,
                         title = "Meetup Arranged",
                         message = "Campus meeting location set to $location.",
-                        type = "ORDER"
+                        type = NotificationTypes.HANDOVER_UPDATE,
+                        dataPayload = mapOf(
+                            "order_id" to orderId,
+                            "tab" to if (recipientId == currentOrder.buyerId) "purchases" else "sales",
+                            "entity_id" to orderId
+                        )
                     )
                 }
 
@@ -309,7 +377,12 @@ class OrderRepositoryImpl(
                         userId = order.buyerId,
                         title = "Request Accepted!",
                         message = "The student seller accepted your purchase request. Coordinate meeting details now.",
-                        type = "ORDER"
+                        type = NotificationTypes.PURCHASE_ACCEPTED,
+                        dataPayload = mapOf(
+                            "order_id" to orderId,
+                            "tab" to "purchases",
+                            "entity_id" to orderId
+                        )
                     )
                 }
 
@@ -361,7 +434,12 @@ class OrderRepositoryImpl(
                         userId = order.buyerId,
                         title = "Request Declined",
                         message = "The student seller was unable to fulfill your request: ${reason ?: "No reason given."}",
-                        type = "ORDER"
+                        type = NotificationTypes.PURCHASE_DECLINED,
+                        dataPayload = mapOf(
+                            "order_id" to orderId,
+                            "tab" to "purchases",
+                            "entity_id" to orderId
+                        )
                     )
                 }
 
@@ -435,7 +513,12 @@ class OrderRepositoryImpl(
                         userId = recipientId,
                         title = "Order Cancelled",
                         message = "The campus transaction was cancelled: ${reason ?: "No reason given."}",
-                        type = "ORDER"
+                        type = NotificationTypes.TRANSACTION_UPDATE,
+                        dataPayload = mapOf(
+                            "order_id" to orderId,
+                            "tab" to if (recipientId == order.buyerId) "purchases" else "sales",
+                            "entity_id" to orderId
+                        )
                     )
                 }
 
@@ -484,7 +567,12 @@ class OrderRepositoryImpl(
                         userId = recipientId,
                         title = "Transaction Completed",
                         message = "Campus handover confirmed! Item verified and physical exchange concluded.",
-                        type = "ORDER"
+                        type = NotificationTypes.TRANSACTION_COMPLETED,
+                        dataPayload = mapOf(
+                            "order_id" to orderId,
+                            "tab" to if (recipientId == order.buyerId) "purchases" else "sales",
+                            "entity_id" to orderId
+                        )
                     )
                 }
 

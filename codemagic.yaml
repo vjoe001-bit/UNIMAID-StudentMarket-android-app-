@@ -1,0 +1,205 @@
+workflows:
+  android-apk-release:
+    name: UNIMAID StudentMarket - Release APK Build
+    max_build_duration: 60
+    instance_type: linux_x2
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+    environment:
+      android_signing:
+        - unimaid_keystore
+      groups:
+        - supabase_config
+      vars:
+        PACKAGE_NAME: "com.aistudio.unimaidmarket.kzvptx"
+      java: 21
+    triggering:
+      events:
+        - push
+        - tag
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+        - pattern: master
+          include: true
+          source: true
+        - pattern: release/*
+          include: true
+          source: true
+    scripts:
+      - name: Set up build environment and secrets
+        script: |
+          echo "=========================================="
+          echo "Setting up build environment for UNIMAID StudentMarket..."
+          echo "=========================================="
+          
+          # Initialize .env file
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+              echo "Created .env from .env.example"
+            else
+              touch .env
+            fi
+          fi
+          
+          # Inject Supabase configuration if passed via Codemagic Environment Variables
+          if [ -n "$SUPABASE_URL" ]; then
+            sed -i.bak '/^SUPABASE_URL=/d' .env || true
+            echo "SUPABASE_URL=$SUPABASE_URL" >> .env
+            echo "Configured SUPABASE_URL from environment variable"
+          fi
+          if [ -n "$SUPABASE_ANON_KEY" ]; then
+            sed -i.bak '/^SUPABASE_ANON_KEY=/d' .env || true
+            echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env
+            echo "Configured SUPABASE_ANON_KEY from environment variable"
+          fi
+          rm -f .env.bak
+          
+          # Make Gradle wrapper executable
+          chmod +x gradlew
+          
+      - name: Configure Android keystore for release signing
+        script: |
+          echo "=========================================="
+          echo "Configuring release signing credentials..."
+          echo "=========================================="
+          
+          # 1. Check for Codemagic managed keystore or base64 environment variable
+          if [ -n "$CM_KEYSTORE" ]; then
+            echo "$CM_KEYSTORE" | base64 --decode > /tmp/unimaid-release.jks
+            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
+            echo "Release keystore configured from CM_KEYSTORE."
+          elif [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/unimaid-release.jks
+            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
+            echo "Release keystore configured from KEYSTORE_BASE64."
+          elif [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            echo "KEYSTORE_PATH=$CM_KEYSTORE_PATH" >> $CM_ENV
+            echo "Using Codemagic managed keystore at $CM_KEYSTORE_PATH."
+          else
+            echo "Notice: No custom release keystore provided. The build will safely use debugConfig signing fallback."
+          fi
+          
+          # 2. Export credentials for Gradle signingConfigs
+          if [ -n "$CM_KEY_ALIAS" ]; then
+            echo "KEY_ALIAS=$CM_KEY_ALIAS" >> $CM_ENV
+          fi
+          if [ -n "$CM_KEY_PASSWORD" ]; then
+            echo "KEY_PASSWORD=$CM_KEY_PASSWORD" >> $CM_ENV
+          fi
+          if [ -n "$CM_KEYSTORE_PASSWORD" ]; then
+            echo "STORE_PASSWORD=$CM_KEYSTORE_PASSWORD" >> $CM_ENV
+          fi
+
+      - name: Run verification unit tests
+        script: |
+          echo "Running unit and architecture test suite..."
+          ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Build release APK
+        script: |
+          echo "Building production release APK..."
+          ./gradlew assembleRelease --stacktrace
+
+    artifacts:
+      - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/mapping/**/mapping.txt
+      - app/build/reports/**
+
+    publishing:
+      email:
+        recipients:
+          - victoriadrambi001@gmail.com
+        notify:
+          failure: true
+          success: true
+
+  android-bundle-release:
+    name: UNIMAID StudentMarket - Google Play Bundle (AAB) Build
+    max_build_duration: 60
+    instance_type: linux_x2
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+    environment:
+      android_signing:
+        - unimaid_keystore
+      groups:
+        - supabase_config
+      vars:
+        PACKAGE_NAME: "com.aistudio.unimaidmarket.kzvptx"
+      java: 21
+    triggering:
+      events:
+        - tag
+      branch_patterns:
+        - pattern: release/*
+          include: true
+          source: true
+    scripts:
+      - name: Set up build environment and secrets
+        script: |
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
+          fi
+          if [ -n "$SUPABASE_URL" ]; then
+            sed -i.bak '/^SUPABASE_URL=/d' .env || true
+            echo "SUPABASE_URL=$SUPABASE_URL" >> .env
+          fi
+          if [ -n "$SUPABASE_ANON_KEY" ]; then
+            sed -i.bak '/^SUPABASE_ANON_KEY=/d' .env || true
+            echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env
+          fi
+          rm -f .env.bak
+          chmod +x gradlew
+
+      - name: Configure Android keystore for release signing
+        script: |
+          if [ -n "$CM_KEYSTORE" ]; then
+            echo "$CM_KEYSTORE" | base64 --decode > /tmp/unimaid-release.jks
+            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
+          elif [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/unimaid-release.jks
+            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
+          elif [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            echo "KEYSTORE_PATH=$CM_KEYSTORE_PATH" >> $CM_ENV
+          fi
+          if [ -n "$CM_KEY_ALIAS" ]; then
+            echo "KEY_ALIAS=$CM_KEY_ALIAS" >> $CM_ENV
+          fi
+          if [ -n "$CM_KEY_PASSWORD" ]; then
+            echo "KEY_PASSWORD=$CM_KEY_PASSWORD" >> $CM_ENV
+          fi
+          if [ -n "$CM_KEYSTORE_PASSWORD" ]; then
+            echo "STORE_PASSWORD=$CM_KEYSTORE_PASSWORD" >> $CM_ENV
+          fi
+
+      - name: Run verification unit tests
+        script: |
+          ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Build release Android App Bundle (AAB)
+        script: |
+          ./gradlew bundleRelease --stacktrace
+
+    artifacts:
+      - app/build/outputs/bundle/release/*.aab
+      - app/build/outputs/mapping/**/mapping.txt
+      - app/build/reports/**
+
+    publishing:
+      email:
+        recipients:
+          - victoriadrambi001@gmail.com
+        notify:
+          failure: true
+          success: true

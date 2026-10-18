@@ -39,12 +39,10 @@ class ProfileRepositoryImpl(
 
     override suspend fun updateProfile(userId: String, updates: Map<String, Any?>): SupabaseResult<Profile> {
         return try {
-            // Strip out any non-column or sensitive fields that ordinary users cannot edit
+            // Strip out sensitive / non-editable columns that students must not modify directly
             val safeUpdates = updates.toMutableMap().apply {
                 remove("id")
                 remove("email")
-                remove("phone_number")
-                remove("phone")
                 remove("student_id_card_url")
                 remove("is_verified")
                 remove("is_suspended")

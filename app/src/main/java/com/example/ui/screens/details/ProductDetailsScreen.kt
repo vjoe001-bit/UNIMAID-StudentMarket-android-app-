@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.ShoppingBag
@@ -146,7 +147,9 @@ fun ProductDetailsScreen(
     onNavigateToEditListing: ((String) -> Unit)? = null,
     onNavigateToCart: (() -> Unit)? = null,
     onNavigateToOrders: (() -> Unit)? = null,
-    orderRepository: OrderRepository = remember { OrderRepositoryImpl() }
+    orderRepository: OrderRepository = remember { OrderRepositoryImpl() },
+    onNavigateToSellerReviews: ((String) -> Unit)? = null,
+    reviewRepository: com.example.data.repository.ReviewRepository = remember { com.example.data.repository.ReviewRepositoryImpl() }
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -155,6 +158,9 @@ fun ProductDetailsScreen(
     var listing by remember { mutableStateOf<Listing?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    var sellerRatingSummary by remember { mutableStateOf<com.example.data.repository.SellerRatingSummary?>(null) }
+    var productReviews by remember { mutableStateOf<List<com.example.data.models.Review>>(emptyList()) }
 
     var selectedImageIndex by remember { mutableIntStateOf(0) }
     var isImageZoomOpen by remember { mutableStateOf(false) }
@@ -189,6 +195,20 @@ fun ProductDetailsScreen(
                             is SupabaseResult.Success -> isFavorite = favResult.data
                             else -> {}
                         }
+                    }
+
+                    // Load seller reputation & listing reviews
+                    val sellerId = result.data.sellerId
+                    if (sellerId.isNotBlank()) {
+                        when (val sumRes = reviewRepository.calculateSellerRating(sellerId)) {
+                            is SupabaseResult.Success -> sellerRatingSummary = sumRes.data
+                            else -> {}
+                        }
+                    }
+
+                    when (val revRes = reviewRepository.getReviewsForListing(listingId)) {
+                        is SupabaseResult.Success -> productReviews = revRes.data
+                        else -> {}
                     }
                 }
                 is SupabaseResult.Error -> {
@@ -411,7 +431,7 @@ fun ProductDetailsScreen(
                         if (!displayImageUrl.isNullOrBlank()) {
                             AsyncImage(
                                 model = displayImageUrl,
-                                contentDescription = item.title,
+                                contentDescription = item.displayTitle,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clickable { isImageZoomOpen = true }
@@ -692,7 +712,7 @@ fun ProductDetailsScreen(
 
                             // Item Title
                             Text(
-                                text = item.title,
+                                text = item.displayTitle,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -768,6 +788,44 @@ fun ProductDetailsScreen(
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
                                             }
+
+                                            // Rating & Reviews row
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.clickable {
+                                                    seller?.id?.let { onNavigateToSellerReviews?.invoke(it) }
+                                                }
+                                            ) {
+                                                val summary = sellerRatingSummary
+                                                if (summary != null && summary.totalReviews > 0) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Star,
+                                                        contentDescription = null,
+                                                        tint = com.example.core.theme.UnimaidGold,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = "%.1f".format(summary.averageRating),
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "(${summary.totalReviews} reviews)",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = "No reviews yet • View profile",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -836,6 +894,74 @@ fun ProductDetailsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
                             )
+
+                            Spacer(modifier = Modifier.height(AppSpacing.lg))
+
+                            // Student Reviews & Feedback Section
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Seller Reviews",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    val count = sellerRatingSummary?.totalReviews ?: 0
+                                    val avg = sellerRatingSummary?.averageRating ?: 0.0
+                                    Text(
+                                        text = if (count > 0) "%.1f ★ • $count verified handovers".format(avg) else "No reviews recorded yet",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                seller?.id?.let { sid ->
+                                    TextButton(onClick = { onNavigateToSellerReviews?.invoke(sid) }) {
+                                        Text("See All", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(AppSpacing.sm))
+
+                            if (productReviews.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                                    productReviews.take(3).forEach { rev ->
+                                        com.example.ui.screens.reviews.ReviewItemCard(
+                                            review = rev,
+                                            onNavigateToProduct = { /* already here */ }
+                                        )
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = AppRadius.md,
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(AppSpacing.md),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = com.example.core.theme.UnimaidGold,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                                        Text(
+                                            text = "Verified student buyers can review after completing a campus meetup.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1108,7 +1234,7 @@ private fun ProductHandoverModalSheet(
                         if (!img.isNullOrBlank()) {
                             AsyncImage(
                                 model = img,
-                                contentDescription = listing.title,
+                                contentDescription = listing.displayTitle,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
                             )
@@ -1121,7 +1247,7 @@ private fun ProductHandoverModalSheet(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = listing.title,
+                            text = listing.displayTitle,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,

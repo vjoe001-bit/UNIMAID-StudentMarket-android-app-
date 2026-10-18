@@ -77,3 +77,27 @@ data class Message(
         get() = message ?: content ?: ""
 }
 
+@JsonClass(generateAdapter = true)
+data class CreateConversationDto(
+    val id: String,
+    @Json(name = "buyer_id")
+    val buyerId: String,
+    @Json(name = "seller_id")
+    val sellerId: String,
+    @Json(name = "listing_id")
+    val listingId: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateMessageDto(
+    val id: String,
+    @Json(name = "conversation_id")
+    val conversationId: String,
+    @Json(name = "sender_id")
+    val senderId: String,
+    val message: String,
+    @Json(name = "is_read")
+    val isRead: Boolean = false
+)
+
+
