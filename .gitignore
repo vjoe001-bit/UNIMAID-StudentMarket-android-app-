@@ -16,3 +16,16 @@
 local.properties
 .env
 debug.keystore
+
+# Keystores & Code Signing Credentials
+*.jks
+*.keystore
+*.p12
+*.jceks
+key.properties
+signing.properties
+*.mobileprovision
+*.cer
+*.cert
+tmp/
+*.tmp

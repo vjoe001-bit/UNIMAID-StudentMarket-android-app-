@@ -30,8 +30,9 @@ workflows:
           include: true
           source: true
     scripts:
-      - name: Set up build environment and secrets
+      - name: 1. Set up build environment and secrets
         script: |
+          set -e
           echo "=========================================="
           echo "Setting up build environment for UNIMAID StudentMarket..."
           echo "=========================================="
@@ -62,48 +63,187 @@ workflows:
           # Make Gradle wrapper executable
           chmod +x gradlew
           
-      - name: Configure Android keystore for release signing
+      - name: 2. Resolve and validate Android release keystore (Fail Closed)
         script: |
+          set -e
           echo "=========================================="
-          echo "Configuring release signing credentials..."
+          echo "Resolving and validating release signing credentials..."
           echo "=========================================="
           
-          # 1. Check for Codemagic managed keystore or base64 environment variable
-          if [ -n "$CM_KEYSTORE" ]; then
-            echo "$CM_KEYSTORE" | base64 --decode > /tmp/unimaid-release.jks
-            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
-            echo "Release keystore configured from CM_KEYSTORE."
+          RESOLVED_KEYSTORE=""
+          
+          # Primary path: Codemagic managed keystore from android_signing
+          if [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            RESOLVED_KEYSTORE="$CM_KEYSTORE_PATH"
+            echo "Found Codemagic managed keystore at $CM_KEYSTORE_PATH"
+          # Alternative path: Base64 encoded keystore environment variable
           elif [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/unimaid-release.jks
-            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
-            echo "Release keystore configured from KEYSTORE_BASE64."
-          elif [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
-            echo "KEYSTORE_PATH=$CM_KEYSTORE_PATH" >> $CM_ENV
-            echo "Using Codemagic managed keystore at $CM_KEYSTORE_PATH."
+            echo "Decoding KEYSTORE_BASE64 to temporary keystore file..."
+            TEMP_KS="/tmp/unimaid-release.jks"
+            if ! echo "$KEYSTORE_BASE64" | base64 --decode > "$TEMP_KS"; then
+              echo "CRITICAL ERROR: Failed to base64-decode KEYSTORE_BASE64." >&2
+              exit 1
+            fi
+            if [ ! -s "$TEMP_KS" ]; then
+              echo "CRITICAL ERROR: Decoded keystore file is empty." >&2
+              rm -f "$TEMP_KS"
+              exit 1
+            fi
+            chmod 600 "$TEMP_KS"
+            RESOLVED_KEYSTORE="$TEMP_KS"
+            echo "Decoded keystore to $RESOLVED_KEYSTORE with restricted permissions (0600)."
+          elif [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
+            RESOLVED_KEYSTORE="$KEYSTORE_PATH"
+            echo "Using keystore from KEYSTORE_PATH: $RESOLVED_KEYSTORE"
           else
-            echo "Notice: No custom release keystore provided. The build will safely use debugConfig signing fallback."
+            echo "CRITICAL ERROR: No Android release keystore was found!" >&2
+            echo "Make sure you uploaded your keystore to Codemagic Team Settings > Code signing identities > Android keystores" >&2
+            echo "with reference name: 'unimaid_keystore'." >&2
+            echo "Or supply a valid KEYSTORE_BASE64 secure environment variable." >&2
+            exit 1
           fi
           
-          # 2. Export credentials for Gradle signingConfigs
-          if [ -n "$CM_KEY_ALIAS" ]; then
-            echo "KEY_ALIAS=$CM_KEY_ALIAS" >> $CM_ENV
-          fi
-          if [ -n "$CM_KEY_PASSWORD" ]; then
-            echo "KEY_PASSWORD=$CM_KEY_PASSWORD" >> $CM_ENV
-          fi
-          if [ -n "$CM_KEYSTORE_PASSWORD" ]; then
-            echo "STORE_PASSWORD=$CM_KEYSTORE_PASSWORD" >> $CM_ENV
+          # Verify the resolved keystore file exists and is readable
+          if [ -z "$RESOLVED_KEYSTORE" ] || [ ! -f "$RESOLVED_KEYSTORE" ] || [ ! -r "$RESOLVED_KEYSTORE" ]; then
+            echo "CRITICAL ERROR: Resolved keystore path is invalid or unreadable: '$RESOLVED_KEYSTORE'" >&2
+            exit 1
           fi
 
-      - name: Run verification unit tests
+          # Resolve passwords and alias in current shell
+          RESOLVED_STORE_PASS="${CM_KEYSTORE_PASSWORD:-$STORE_PASSWORD}"
+          RESOLVED_KEY_ALIAS="${CM_KEY_ALIAS:-$KEY_ALIAS}"
+          RESOLVED_KEY_PASS="${CM_KEY_PASSWORD:-${KEY_PASSWORD:-$RESOLVED_STORE_PASS}}"
+
+          if [ -z "$RESOLVED_STORE_PASS" ]; then
+            echo "CRITICAL ERROR: Keystore password is missing (CM_KEYSTORE_PASSWORD or STORE_PASSWORD)." >&2
+            exit 1
+          fi
+          if [ -z "$RESOLVED_KEY_ALIAS" ]; then
+            echo "CRITICAL ERROR: Key alias is missing (CM_KEY_ALIAS or KEY_ALIAS)." >&2
+            exit 1
+          fi
+
+          # Validate keystore integrity and private-key entry using keytool (Fail Closed)
+          echo "Validating keystore integrity, password, and private key entry..."
+          KS_INFO_FILE="/tmp/ks_inspect.txt"
+          
+          if ! echo "$RESOLVED_STORE_PASS" | keytool -list -v -keystore "$RESOLVED_KEYSTORE" -alias "$RESOLVED_KEY_ALIAS" > "$KS_INFO_FILE" 2>/dev/null; then
+            echo "CRITICAL ERROR: keytool failed to open keystore or alias '$RESOLVED_KEY_ALIAS' was not found." >&2
+            echo "Check that the keystore password and key alias match the uploaded keystore." >&2
+            rm -f "$KS_INFO_FILE"
+            exit 1
+          fi
+
+          # Verify that the alias identifies a PrivateKeyEntry
+          if ! grep -q "Entry type: PrivateKeyEntry" "$KS_INFO_FILE"; then
+            echo "CRITICAL ERROR: Alias '$RESOLVED_KEY_ALIAS' does not contain a PrivateKeyEntry (cannot sign apps)." >&2
+            rm -f "$KS_INFO_FILE"
+            exit 1
+          fi
+
+          # Extract certificate SHA-256 fingerprint for signature verification step
+          EXPECTED_SHA256=$(grep -i "SHA256:" "$KS_INFO_FILE" | head -n 1 | sed 's/.*SHA256: *//I' | tr -d ' :' | tr '[:upper:]' '[:lower:]')
+          rm -f "$KS_INFO_FILE"
+
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "CRITICAL ERROR: Could not extract certificate SHA-256 fingerprint from keystore." >&2
+            exit 1
+          fi
+
+          # Save expected fingerprint to disk and environment
+          echo "$EXPECTED_SHA256" > /tmp/expected_keystore_sha256.txt
+          echo "EXPECTED_KEYSTORE_SHA256=$EXPECTED_SHA256" >> $CM_ENV
+          echo "Keystore validated successfully. Target certificate fingerprint recorded."
+
+          # Persist resolved signing environment for subsequent Gradle steps
+          echo "CM_KEYSTORE_PATH=$RESOLVED_KEYSTORE" >> $CM_ENV
+          echo "KEYSTORE_PATH=$RESOLVED_KEYSTORE" >> $CM_ENV
+          echo "CM_KEY_ALIAS=$RESOLVED_KEY_ALIAS" >> $CM_ENV
+          echo "KEY_ALIAS=$RESOLVED_KEY_ALIAS" >> $CM_ENV
+          echo "CM_KEYSTORE_PASSWORD=$RESOLVED_STORE_PASS" >> $CM_ENV
+          echo "STORE_PASSWORD=$RESOLVED_STORE_PASS" >> $CM_ENV
+          echo "CM_KEY_PASSWORD=$RESOLVED_KEY_PASS" >> $CM_ENV
+          echo "KEY_PASSWORD=$RESOLVED_KEY_PASS" >> $CM_ENV
+
+      - name: 3. Run verification unit tests
         script: |
+          set -e
           echo "Running unit and architecture test suite..."
           ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Build release APK
+      - name: 4. Build release APK
         script: |
+          set -e
           echo "Building production release APK..."
           ./gradlew assembleRelease --stacktrace
+
+      - name: 5. Verify release APK signature (Fail Closed)
+        script: |
+          set -e
+          echo "=========================================="
+          echo "Verifying release APK digital signature..."
+          echo "=========================================="
+          
+          # 1. Locate apksigner
+          APKSIGNER=$(which apksigner 2>/dev/null || find "${ANDROID_SDK_ROOT:-/opt/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "CRITICAL ERROR: apksigner tool could not be located in Android build-tools." >&2
+            exit 1
+          fi
+          echo "Using apksigner at: $APKSIGNER"
+
+          # 2. Locate generated APK artifact
+          APK_FILE=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n 1)
+          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
+            echo "CRITICAL ERROR: Release APK artifact was not found in app/build/outputs/apk/release/!" >&2
+            exit 1
+          fi
+          echo "Verifying: $APK_FILE"
+
+          # 3. Verify signature with apksigner
+          APK_VERIFY_LOG="/tmp/apk_verify_output.txt"
+          if ! "$APKSIGNER" verify --verbose --print-certs "$APK_FILE" > "$APK_VERIFY_LOG" 2>&1; then
+            cat "$APK_VERIFY_LOG" >&2
+            rm -f "$APK_VERIFY_LOG"
+            echo "CRITICAL ERROR: apksigner signature verification failed!" >&2
+            exit 1
+          fi
+          cat "$APK_VERIFY_LOG"
+
+          # Check for 'Verifies'
+          if ! grep -q "Verifies" "$APK_VERIFY_LOG"; then
+            echo "CRITICAL ERROR: APK does not meet signature requirements." >&2
+            rm -f "$APK_VERIFY_LOG"
+            exit 1
+          fi
+
+          # 4. Extract APK signer certificate SHA-256 digest
+          APK_SHA256=$(grep -i "SHA-256 digest:" "$APK_VERIFY_LOG" | head -n 1 | awk '{print $NF}' | tr -d ' :' | tr '[:upper:]' '[:lower:]')
+          rm -f "$APK_VERIFY_LOG"
+
+          if [ -z "$APK_SHA256" ]; then
+            echo "CRITICAL ERROR: Could not extract signer certificate SHA-256 digest from APK." >&2
+            exit 1
+          fi
+
+          # 5. Compare with expected keystore fingerprint
+          EXPECTED_SHA256=$(cat /tmp/expected_keystore_sha256.txt 2>/dev/null || echo "$EXPECTED_KEYSTORE_SHA256")
+          if [ -n "$EXPECTED_SHA256" ]; then
+            if [ "$APK_SHA256" != "$EXPECTED_SHA256" ]; then
+              echo "CRITICAL ERROR: Fingerprint mismatch!" >&2
+              echo "APK Certificate SHA-256:      $APK_SHA256" >&2
+              echo "Expected Keystore SHA-256:     $EXPECTED_SHA256" >&2
+              exit 1
+            fi
+            echo "SUCCESS: APK signature matches the expected release keystore certificate ($APK_SHA256)."
+          else
+            echo "Notice: Expected certificate file unavailable, but apksigner verified signature."
+          fi
+
+      - name: 6. Clean up temporary signing files
+        script: |
+          rm -f /tmp/unimaid-release.jks /tmp/expected_keystore_sha256.txt /tmp/ks_inspect.txt /tmp/apk_verify_output.txt
+          echo "Temporary signing files cleaned up."
 
     artifacts:
       - app/build/outputs/apk/release/*.apk
@@ -142,8 +282,9 @@ workflows:
           include: true
           source: true
     scripts:
-      - name: Set up build environment and secrets
+      - name: 1. Set up build environment and secrets
         script: |
+          set -e
           if [ ! -f .env ]; then
             if [ -f .env.example ]; then
               cp .env.example .env
@@ -162,34 +303,115 @@ workflows:
           rm -f .env.bak
           chmod +x gradlew
 
-      - name: Configure Android keystore for release signing
+      - name: 2. Resolve and validate Android release keystore (Fail Closed)
         script: |
-          if [ -n "$CM_KEYSTORE" ]; then
-            echo "$CM_KEYSTORE" | base64 --decode > /tmp/unimaid-release.jks
-            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
+          set -e
+          RESOLVED_KEYSTORE=""
+          
+          if [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            RESOLVED_KEYSTORE="$CM_KEYSTORE_PATH"
           elif [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/unimaid-release.jks
-            echo "KEYSTORE_PATH=/tmp/unimaid-release.jks" >> $CM_ENV
-          elif [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
-            echo "KEYSTORE_PATH=$CM_KEYSTORE_PATH" >> $CM_ENV
+            TEMP_KS="/tmp/unimaid-release.jks"
+            if ! echo "$KEYSTORE_BASE64" | base64 --decode > "$TEMP_KS"; then
+              echo "CRITICAL ERROR: Failed to decode KEYSTORE_BASE64." >&2
+              exit 1
+            fi
+            if [ ! -s "$TEMP_KS" ]; then
+              echo "CRITICAL ERROR: Decoded keystore file is empty." >&2
+              rm -f "$TEMP_KS"
+              exit 1
+            fi
+            chmod 600 "$TEMP_KS"
+            RESOLVED_KEYSTORE="$TEMP_KS"
+          elif [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
+            RESOLVED_KEYSTORE="$KEYSTORE_PATH"
+          else
+            echo "CRITICAL ERROR: No Android release keystore was detected for bundle build!" >&2
+            exit 1
           fi
-          if [ -n "$CM_KEY_ALIAS" ]; then
-            echo "KEY_ALIAS=$CM_KEY_ALIAS" >> $CM_ENV
-          fi
-          if [ -n "$CM_KEY_PASSWORD" ]; then
-            echo "KEY_PASSWORD=$CM_KEY_PASSWORD" >> $CM_ENV
-          fi
-          if [ -n "$CM_KEYSTORE_PASSWORD" ]; then
-            echo "STORE_PASSWORD=$CM_KEYSTORE_PASSWORD" >> $CM_ENV
+          
+          if [ -z "$RESOLVED_KEYSTORE" ] || [ ! -f "$RESOLVED_KEYSTORE" ] || [ ! -r "$RESOLVED_KEYSTORE" ]; then
+            echo "CRITICAL ERROR: Keystore file missing or unreadable: '$RESOLVED_KEYSTORE'" >&2
+            exit 1
           fi
 
-      - name: Run verification unit tests
+          RESOLVED_STORE_PASS="${CM_KEYSTORE_PASSWORD:-$STORE_PASSWORD}"
+          RESOLVED_KEY_ALIAS="${CM_KEY_ALIAS:-$KEY_ALIAS}"
+          RESOLVED_KEY_PASS="${CM_KEY_PASSWORD:-${KEY_PASSWORD:-$RESOLVED_STORE_PASS}}"
+
+          if [ -z "$RESOLVED_STORE_PASS" ] || [ -z "$RESOLVED_KEY_ALIAS" ]; then
+            echo "CRITICAL ERROR: Keystore password or alias is missing." >&2
+            exit 1
+          fi
+
+          KS_INFO_FILE="/tmp/ks_inspect_bundle.txt"
+          if ! echo "$RESOLVED_STORE_PASS" | keytool -list -v -keystore "$RESOLVED_KEYSTORE" -alias "$RESOLVED_KEY_ALIAS" > "$KS_INFO_FILE" 2>/dev/null; then
+            echo "CRITICAL ERROR: keytool could not open keystore or find alias '$RESOLVED_KEY_ALIAS'." >&2
+            rm -f "$KS_INFO_FILE"
+            exit 1
+          fi
+          if ! grep -q "Entry type: PrivateKeyEntry" "$KS_INFO_FILE"; then
+            echo "CRITICAL ERROR: Alias does not contain a PrivateKeyEntry." >&2
+            rm -f "$KS_INFO_FILE"
+            exit 1
+          fi
+          rm -f "$KS_INFO_FILE"
+          echo "Keystore validation succeeded for AAB bundle build."
+
+          echo "CM_KEYSTORE_PATH=$RESOLVED_KEYSTORE" >> $CM_ENV
+          echo "KEYSTORE_PATH=$RESOLVED_KEYSTORE" >> $CM_ENV
+          echo "CM_KEY_ALIAS=$RESOLVED_KEY_ALIAS" >> $CM_ENV
+          echo "KEY_ALIAS=$RESOLVED_KEY_ALIAS" >> $CM_ENV
+          echo "CM_KEYSTORE_PASSWORD=$RESOLVED_STORE_PASS" >> $CM_ENV
+          echo "STORE_PASSWORD=$RESOLVED_STORE_PASS" >> $CM_ENV
+          echo "CM_KEY_PASSWORD=$RESOLVED_KEY_PASS" >> $CM_ENV
+          echo "KEY_PASSWORD=$RESOLVED_KEY_PASS" >> $CM_ENV
+
+      - name: 3. Run verification unit tests
         script: |
+          set -e
           ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Build release Android App Bundle (AAB)
+      - name: 4. Build release Android App Bundle (AAB)
         script: |
+          set -e
           ./gradlew bundleRelease --stacktrace
+
+      - name: 5. Verify release AAB signature (Fail Closed)
+        script: |
+          set -e
+          echo "=========================================="
+          echo "Verifying release AAB digital signature..."
+          echo "=========================================="
+          
+          AAB_FILE=$(ls app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n 1)
+          if [ -z "$AAB_FILE" ] || [ ! -f "$AAB_FILE" ]; then
+            echo "CRITICAL ERROR: Release AAB artifact not found in app/build/outputs/bundle/release/!" >&2
+            exit 1
+          fi
+          echo "Verifying bundle: $AAB_FILE"
+
+          AAB_VERIFY_LOG="/tmp/aab_verify.txt"
+          if ! jarsigner -verify -verbose -certs "$AAB_FILE" > "$AAB_VERIFY_LOG" 2>&1; then
+            cat "$AAB_VERIFY_LOG" >&2
+            rm -f "$AAB_VERIFY_LOG"
+            echo "CRITICAL ERROR: jarsigner verification failed for AAB!" >&2
+            exit 1
+          fi
+
+          if ! grep -q "jar verified" "$AAB_VERIFY_LOG"; then
+            echo "CRITICAL ERROR: AAB bundle is not verified by jarsigner." >&2
+            cat "$AAB_VERIFY_LOG" >&2
+            rm -f "$AAB_VERIFY_LOG"
+            exit 1
+          fi
+          rm -f "$AAB_VERIFY_LOG"
+          echo "SUCCESS: AAB bundle signature successfully verified."
+
+      - name: 6. Clean up temporary signing files
+        script: |
+          rm -f /tmp/unimaid-release.jks /tmp/ks_inspect_bundle.txt /tmp/aab_verify.txt
+          echo "Temporary signing files cleaned up."
 
     artifacts:
       - app/build/outputs/bundle/release/*.aab
